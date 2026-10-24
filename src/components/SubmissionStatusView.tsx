@@ -130,18 +130,21 @@ export default function SubmissionStatusView({
   return (
     <div className="max-w-7xl mx-auto space-y-6">
       {/* Top Banner & Stats */}
-      <div className="bg-white/95 backdrop-blur-md rounded-3xl p-6 md:p-8 shadow-xl border border-white/60">
+      <div className="bg-gradient-to-r from-white/95 via-purple-50/60 to-pink-50/60 backdrop-blur-md rounded-3xl p-6 md:p-8 shadow-xl shadow-purple-100/40 border border-purple-100/80">
         <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-6">
           <div>
-            <div className="inline-flex items-center gap-2 px-3 py-1 bg-emerald-50 border border-emerald-200 text-emerald-700 rounded-full text-xs font-semibold mb-2">
+            <div className="inline-flex items-center gap-2 px-3 py-1 bg-emerald-100/80 border border-emerald-200 text-emerald-800 rounded-full text-xs font-semibold mb-2">
               <span className="w-2 h-2 rounded-full bg-emerald-500 animate-ping" />
-              ระบบค้นหาแบบ Real-time ค้นหาได้ทันทีขณะพิมพ์
+              <span>⚡ ระบบค้นหาแบบ Real-time ค้นหาได้ทันทีขณะพิมพ์ 🎯</span>
             </div>
-            <h1 className="text-2xl md:text-3xl font-bold text-gray-900 tracking-tight">
-              ตรวจสอบสถานะการส่งงานและคะแนน
+            <h1 className="text-2xl md:text-3xl font-bold text-gray-900 tracking-tight flex items-center gap-2">
+              <span>📊 ตรวจสอบสถานะการส่งงานและคะแนน</span>
+              <span>✨</span>
             </h1>
-            <p className="text-sm text-gray-500 mt-1">
-              โรงเรียนท่าบ่อ • ตรวจสอบคะแนนและสถานะผลงานของตนเองได้แบบเรียลไทม์
+            <p className="text-sm text-gray-500 mt-1 flex items-center gap-1.5">
+              <span>🏫 โรงเรียนท่าบ่อ</span>
+              <span>•</span>
+              <span>ตรวจสอบคะแนนและสถานะผลงานของตนเองได้แบบเรียลไทม์ 🌸</span>
             </p>
           </div>
 
@@ -150,66 +153,67 @@ export default function SubmissionStatusView({
             <button
               onClick={handleRefresh}
               disabled={isRefreshing}
-              className="flex items-center gap-2 px-4 py-2.5 bg-white border border-gray-200 hover:bg-gray-50 text-gray-700 text-sm font-medium rounded-xl shadow-sm transition-all cursor-pointer"
+              className="flex items-center gap-2 px-4 py-2.5 bg-white border border-purple-200/80 hover:bg-purple-50 text-violet-800 text-sm font-medium rounded-xl shadow-xs transition-all cursor-pointer"
             >
-              <RefreshCw size={16} className={isRefreshing ? 'animate-spin text-indigo-600' : 'text-gray-500'} />
-              <span>ดึงข้อมูลล่าสุด</span>
+              <RefreshCw size={16} className={isRefreshing ? 'animate-spin text-violet-600' : 'text-violet-500'} />
+              <span>🔄 ดึงข้อมูลล่าสุด</span>
             </button>
 
             <button
               onClick={handleExportExcel}
-              className="flex items-center gap-2 px-4 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-medium rounded-xl shadow-sm shadow-emerald-200 transition-all cursor-pointer"
+              className="flex items-center gap-2 px-4 py-2.5 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 text-white text-sm font-medium rounded-xl shadow-sm shadow-emerald-200 transition-all cursor-pointer"
             >
               <FileSpreadsheet size={16} />
-              <span>ส่งออก Excel</span>
+              <span>📊 ส่งออก Excel</span>
             </button>
 
             <button
               onClick={handleExportPdf}
-              className="flex items-center gap-2 px-4 py-2.5 bg-red-600 hover:bg-red-700 text-white text-sm font-medium rounded-xl shadow-sm shadow-red-200 transition-all cursor-pointer"
+              className="flex items-center gap-2 px-4 py-2.5 bg-gradient-to-r from-rose-500 to-pink-600 hover:from-rose-600 hover:to-pink-700 text-white text-sm font-medium rounded-xl shadow-sm shadow-pink-200 transition-all cursor-pointer"
             >
               <FileDown size={16} />
-              <span>ส่งออก PDF</span>
+              <span>📄 ส่งออก PDF</span>
             </button>
           </div>
         </div>
 
         {/* Informational Subtitle */}
-        <div className="mt-4 pt-4 border-t border-gray-100 flex items-center justify-between flex-wrap gap-2 text-xs text-gray-500">
-          <div className="flex items-center gap-1.5">
-            <span className="w-2 h-2 rounded-full bg-indigo-500" />
-            <span>แสดงเฉพาะข้อมูลผลงานและคะแนนของนักเรียนที่พิมพ์ค้นหาเท่านั้น</span>
+        <div className="mt-4 pt-4 border-t border-purple-100/70 flex items-center justify-between flex-wrap gap-2 text-xs text-gray-600">
+          <div className="flex items-center gap-2">
+            <span className="text-base">🔒</span>
+            <span className="font-medium">แสดงเฉพาะข้อมูลผลงานและคะแนนของนักเรียนที่พิมพ์ค้นหาเท่านั้น เพื่อความเป็นส่วนตัว</span>
           </div>
           {hasSearched && (
             <button
               onClick={handleClearSearch}
-              className="text-indigo-600 hover:text-indigo-800 font-semibold cursor-pointer underline"
+              className="text-violet-700 hover:text-violet-900 font-semibold cursor-pointer underline flex items-center gap-1"
             >
-              ล้างการค้นหา
+              <span>ล้างการค้นหา</span>
+              <span>✕</span>
             </button>
           )}
         </div>
       </div>
 
       {/* Search & Filter Bar */}
-      <div className="bg-white/95 backdrop-blur-md rounded-3xl p-6 shadow-xl border border-white/60 space-y-3">
+      <div className="bg-white/95 backdrop-blur-md rounded-3xl p-6 shadow-xl shadow-purple-100/30 border border-purple-100/70 space-y-3">
         <div className="flex flex-col md:flex-row gap-3 items-center">
           {/* Real-time Search Box */}
           <div className="relative flex-1 w-full">
-            <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-indigo-500" size={18} />
+            <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-violet-500" size={18} />
             <input
               type="text"
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
-              placeholder="พิมพ์ชื่อ หรือ นามสกุล นักเรียน เพื่อค้นหาผลงานทันที (เช่น สมชาย หรือ ท่าบ่อ)..."
-              className="w-full pl-11 pr-20 py-3.5 bg-gray-50/90 border border-gray-200 rounded-2xl text-sm font-medium focus:bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500 transition-all shadow-inner"
+              placeholder="🔍 พิมพ์ชื่อ หรือ นามสกุล นักเรียน เพื่อค้นหาผลงานทันที (เช่น สมชาย หรือ ท่าบ่อ)..."
+              className="w-full pl-11 pr-20 py-3.5 bg-purple-50/20 border border-purple-200/80 rounded-2xl text-sm font-medium focus:bg-white focus:outline-none focus:ring-2 focus:ring-purple-300 focus:border-purple-400 transition-all shadow-inner"
             />
             {searchTerm && (
               <button
                 onClick={handleClearSearch}
                 className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-500 hover:text-gray-700 text-xs px-2.5 py-1.5 rounded-lg bg-gray-200 hover:bg-gray-300 font-medium cursor-pointer transition-colors"
               >
-                ล้าง
+                ล้าง ✕
               </button>
             )}
           </div>
@@ -220,9 +224,9 @@ export default function SubmissionStatusView({
             <select
               value={selectedGrade}
               onChange={(e) => setSelectedGrade(e.target.value)}
-              className="px-3 py-2.5 bg-gray-50/80 border border-gray-200 rounded-xl text-xs font-medium text-gray-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 cursor-pointer"
+              className="px-3.5 py-2.5 bg-purple-50/20 border border-purple-200/70 rounded-xl text-xs font-medium text-gray-700 focus:outline-none focus:ring-2 focus:ring-purple-300 cursor-pointer"
             >
-              <option value="ALL">ทุกระดับชั้น</option>
+              <option value="ALL">🏫 ทุกระดับชั้น</option>
               {GRADE_LEVELS.map(g => (
                 <option key={g} value={g}>{g}</option>
               ))}
@@ -232,9 +236,9 @@ export default function SubmissionStatusView({
             <select
               value={selectedRoom}
               onChange={(e) => setSelectedRoom(e.target.value)}
-              className="px-3 py-2.5 bg-gray-50/80 border border-gray-200 rounded-xl text-xs font-medium text-gray-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 cursor-pointer"
+              className="px-3.5 py-2.5 bg-purple-50/20 border border-purple-200/70 rounded-xl text-xs font-medium text-gray-700 focus:outline-none focus:ring-2 focus:ring-purple-300 cursor-pointer"
             >
-              <option value="ALL">ทุกห้อง (1-14)</option>
+              <option value="ALL">🚪 ทุกห้อง (1-14)</option>
               {ROOMS.map(r => (
                 <option key={r} value={r}>ห้อง {r}</option>
               ))}
@@ -244,9 +248,9 @@ export default function SubmissionStatusView({
             <select
               value={selectedStatus}
               onChange={(e) => setSelectedStatus(e.target.value)}
-              className="px-3 py-2.5 bg-gray-50/80 border border-gray-200 rounded-xl text-xs font-medium text-gray-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 cursor-pointer"
+              className="px-3.5 py-2.5 bg-purple-50/20 border border-purple-200/70 rounded-xl text-xs font-medium text-gray-700 focus:outline-none focus:ring-2 focus:ring-purple-300 cursor-pointer"
             >
-              <option value="ALL">สถานะทั้งหมด</option>
+              <option value="ALL">🏷️ สถานะทั้งหมด</option>
               <option value="รอตรวจ">⏳ รอตรวจ</option>
               <option value="ตรวจแล้ว">✅ ตรวจแล้ว</option>
             </select>
@@ -254,94 +258,109 @@ export default function SubmissionStatusView({
         </div>
 
         <div className="text-[11px] text-gray-500 flex items-center gap-1.5 px-1">
-          <span className="w-1.5 h-1.5 rounded-full bg-indigo-500" />
-          <span>ค้นหาแบบ Real-time: พิมพ์ชื่อจริง หรือนามสกุล หรือเลขที่ เพื่อดูผลงานและคะแนนของนักเรียน</span>
+          <span className="w-1.5 h-1.5 rounded-full bg-violet-500" />
+          <span>⚡ ค้นหาแบบ Real-time: พิมพ์ชื่อจริง นามสกุล หรือเลขที่ เพื่อดูผลงานและคะแนนของนักเรียนทันที</span>
         </div>
       </div>
 
       {/* Main Content: Prompt when not searched, or Student Results when searched */}
       {!hasSearched ? (
-        <div className="bg-white/95 backdrop-blur-md rounded-3xl p-10 md:p-14 shadow-xl border border-white/60 text-center space-y-5">
-          <div className="w-20 h-20 rounded-3xl bg-gradient-to-tr from-indigo-500 to-purple-600 text-white flex items-center justify-center mx-auto shadow-lg shadow-indigo-200">
-            <Search size={36} />
+        <div className="bg-gradient-to-b from-white/95 via-purple-50/30 to-pink-50/30 backdrop-blur-md rounded-3xl p-10 md:p-14 shadow-xl shadow-purple-100/30 border border-purple-100/80 text-center space-y-5">
+          <div className="w-20 h-20 rounded-3xl bg-gradient-to-tr from-violet-500 via-indigo-500 to-pink-500 text-white flex items-center justify-center mx-auto shadow-lg shadow-purple-200 text-3xl">
+            🔍
           </div>
           <div className="max-w-lg mx-auto space-y-2">
-            <h2 className="text-xl md:text-2xl font-bold text-gray-900">
-              พิมพ์ชื่อนักเรียนเพื่อเริ่มการตรวจสอบ
+            <h2 className="text-xl md:text-2xl font-bold text-gray-900 flex items-center justify-center gap-2">
+              <span>พิมพ์ชื่อนักเรียนเพื่อเริ่มการตรวจสอบ</span>
+              <span>✨</span>
             </h2>
             <p className="text-sm text-gray-500 leading-relaxed">
-              ระบบได้รับการตั้งค่าให้ <span className="font-semibold text-indigo-600">แสดงเฉพาะข้อมูลของนักเรียนที่พิมพ์ค้นหาเท่านั้น</span> เพื่อความเป็นส่วนตัวและความรวดเร็วในการดูคะแนน
+              ระบบได้รับการตั้งค่าให้ <span className="font-semibold text-violet-700">แสดงเฉพาะข้อมูลของนักเรียนที่พิมพ์ค้นหาเท่านั้น</span> เพื่อความเป็นส่วนตัวและความรวดเร็วในการดูคะแนน
             </p>
           </div>
-          <div className="inline-flex items-center gap-2 px-4 py-2 bg-indigo-50 border border-indigo-100 rounded-2xl text-xs text-indigo-700 font-medium">
-            💡 กรุณาพิมพ์ชื่อหรือนามสกุลในช่องค้นหาด้านบนเพื่อดูรายการผลงานของคุณ
+          <div className="inline-flex items-center gap-2 px-4 py-2 bg-gradient-to-r from-violet-100/80 via-purple-100/80 to-pink-100/80 border border-purple-200/80 rounded-2xl text-xs text-violet-900 font-medium shadow-xs">
+            <span>💡</span>
+            <span>กรุณาพิมพ์ชื่อหรือนามสกุลในช่องค้นหาด้านบน เพื่อดูรายการผลงานของคุณ</span>
           </div>
         </div>
       ) : (
         <>
           {/* 4 Stat Cards for the searched student */}
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-            <div className="bg-white/95 backdrop-blur-md p-4 md:p-5 rounded-2xl border border-white/60 shadow-lg">
-              <div className="flex items-center justify-between text-indigo-600 mb-1">
-                <span className="text-xs font-semibold uppercase">งานที่ส่งของนักเรียน</span>
+            {/* Card 1: Pastel Lavender */}
+            <div className="bg-gradient-to-br from-indigo-50/90 to-purple-50/90 backdrop-blur-md p-4 md:p-5 rounded-2xl border border-indigo-200/70 shadow-md shadow-indigo-100/40">
+              <div className="flex items-center justify-between text-indigo-700 mb-1">
+                <span className="text-xs font-semibold uppercase flex items-center gap-1">
+                  <span>📑</span> งานที่ส่งของนักเรียน
+                </span>
                 <Layers size={18} />
               </div>
-              <div className="text-2xl md:text-3xl font-extrabold text-indigo-900">{studentTotalCount}</div>
-              <div className="text-[11px] text-indigo-700 mt-0.5">ชิ้นงานที่ค้นพบ</div>
+              <div className="text-2xl md:text-3xl font-extrabold text-indigo-950">{studentTotalCount}</div>
+              <div className="text-[11px] text-indigo-700 mt-0.5">ชิ้นงานที่ค้นพบ ✨</div>
             </div>
 
-            <div className="bg-white/95 backdrop-blur-md p-4 md:p-5 rounded-2xl border border-white/60 shadow-lg">
-              <div className="flex items-center justify-between text-emerald-600 mb-1">
-                <span className="text-xs font-semibold uppercase">ตรวจแล้ว</span>
+            {/* Card 2: Pastel Mint */}
+            <div className="bg-gradient-to-br from-emerald-50/90 to-teal-50/90 backdrop-blur-md p-4 md:p-5 rounded-2xl border border-emerald-200/70 shadow-md shadow-emerald-100/40">
+              <div className="flex items-center justify-between text-emerald-700 mb-1">
+                <span className="text-xs font-semibold uppercase flex items-center gap-1">
+                  <span>✅</span> ตรวจแล้ว
+                </span>
                 <CheckCircle size={18} />
               </div>
-              <div className="text-2xl md:text-3xl font-extrabold text-emerald-900">{studentGradedCount}</div>
+              <div className="text-2xl md:text-3xl font-extrabold text-emerald-950">{studentGradedCount}</div>
               <div className="text-[11px] text-emerald-700 mt-0.5">
                 {studentTotalCount > 0 ? Math.round((studentGradedCount / studentTotalCount) * 100) : 0}% ของงานที่ส่ง
               </div>
             </div>
 
-            <div className="bg-white/95 backdrop-blur-md p-4 md:p-5 rounded-2xl border border-white/60 shadow-lg">
-              <div className="flex items-center justify-between text-amber-600 mb-1">
-                <span className="text-xs font-semibold uppercase">รอตรวจ</span>
+            {/* Card 3: Pastel Peach */}
+            <div className="bg-gradient-to-br from-amber-50/90 to-orange-50/90 backdrop-blur-md p-4 md:p-5 rounded-2xl border border-amber-200/70 shadow-md shadow-amber-100/40">
+              <div className="flex items-center justify-between text-amber-700 mb-1">
+                <span className="text-xs font-semibold uppercase flex items-center gap-1">
+                  <span>⏳</span> รอตรวจ
+                </span>
                 <Clock size={18} />
               </div>
-              <div className="text-2xl md:text-3xl font-extrabold text-amber-900">{studentWaitingCount}</div>
-              <div className="text-[11px] text-amber-700 mt-0.5">รอคุณครูให้คะแนน</div>
+              <div className="text-2xl md:text-3xl font-extrabold text-amber-950">{studentWaitingCount}</div>
+              <div className="text-[11px] text-amber-700 mt-0.5">รอคุณครูให้คะแนน 📝</div>
             </div>
 
-            <div className="bg-white/95 backdrop-blur-md p-4 md:p-5 rounded-2xl border border-white/60 shadow-lg">
-              <div className="flex items-center justify-between text-purple-600 mb-1">
-                <span className="text-xs font-semibold uppercase">คะแนนรวมสะสม</span>
+            {/* Card 4: Pastel Rose */}
+            <div className="bg-gradient-to-br from-pink-50/90 to-rose-50/90 backdrop-blur-md p-4 md:p-5 rounded-2xl border border-pink-200/70 shadow-md shadow-pink-100/40">
+              <div className="flex items-center justify-between text-pink-700 mb-1">
+                <span className="text-xs font-semibold uppercase flex items-center gap-1">
+                  <span>🏆</span> คะแนนรวมสะสม
+                </span>
                 <Award size={18} />
               </div>
-              <div className="text-2xl md:text-3xl font-extrabold text-purple-900 flex items-baseline gap-1">
+              <div className="text-2xl md:text-3xl font-extrabold text-pink-950 flex items-baseline gap-1">
                 <span>{studentTotalEarned}</span>
-                <span className="text-xs text-gray-400 font-normal">/ {studentTotalMax}</span>
+                <span className="text-xs text-gray-500 font-normal">/ {studentTotalMax}</span>
               </div>
-              <div className="text-[11px] text-purple-700 mt-0.5">
-                {studentTotalMax > 0 ? `${Math.round((studentTotalEarned / studentTotalMax) * 100)}% ของคะแนนเต็ม` : 'คะแนนที่ได้'}
+              <div className="text-[11px] text-pink-700 mt-0.5">
+                {studentTotalMax > 0 ? `${Math.round((studentTotalEarned / studentTotalMax) * 100)}% ของคะแนนเต็ม 🌟` : 'คะแนนที่ได้'}
               </div>
             </div>
           </div>
 
           {/* Submissions Table / Cards */}
-          <div className="bg-white/95 backdrop-blur-md rounded-3xl shadow-xl border border-white/60 overflow-hidden">
+          <div className="bg-white/95 backdrop-blur-md rounded-3xl shadow-xl shadow-purple-100/30 border border-purple-100/70 overflow-hidden">
             {/* Table Header Filter Indicator */}
             {filteredSubmissions.length > 0 && (
-              <div className="p-4 sm:p-5 bg-indigo-50/60 border-b border-indigo-100/80 flex flex-wrap items-center justify-between gap-3">
+              <div className="p-4 sm:p-5 bg-gradient-to-r from-violet-50/70 via-purple-50/60 to-pink-50/70 border-b border-purple-100/80 flex flex-wrap items-center justify-between gap-3">
                 <div className="flex items-center gap-2 flex-wrap">
-                  <span className="text-xs text-gray-500">ผลการค้นหาสำหรับนักเรียน:</span>
-                  <span className="px-3 py-1 bg-white border border-indigo-200 rounded-full text-xs font-bold text-indigo-700 shadow-xs">
-                    {searchTerm}
+                  <span className="text-xs text-gray-600">ผลการค้นหาสำหรับนักเรียน:</span>
+                  <span className="px-3 py-1 bg-white border border-purple-200 rounded-full text-xs font-bold text-violet-700 shadow-xs">
+                    🧑‍🎓 {searchTerm}
                   </span>
-                  <span className="text-xs text-gray-400">({studentTotalCount} ชิ้นงาน)</span>
+                  <span className="text-xs text-purple-600 font-medium">({studentTotalCount} ชิ้นงาน)</span>
                 </div>
                 <button
                   onClick={handleClearSearch}
-                  className="text-xs text-indigo-600 hover:text-indigo-800 font-semibold cursor-pointer underline"
+                  className="text-xs text-violet-700 hover:text-violet-900 font-semibold cursor-pointer underline flex items-center gap-1"
                 >
-                  ค้นหานักเรียนคนอื่น
+                  <span>ค้นหานักเรียนคนอื่น</span>
+                  <span>🔄</span>
                 </button>
               </div>
             )}
@@ -368,43 +387,43 @@ export default function SubmissionStatusView({
           <div className="overflow-x-auto">
             <table className="w-full text-left border-collapse">
               <thead>
-                <tr className="bg-gray-50/90 border-b border-gray-200/80 text-[11px] font-bold text-gray-600 uppercase tracking-wider">
-                  <th className="py-4 px-4 text-center w-14">เลขที่</th>
-                  <th className="py-4 px-4">ผู้ส่งงาน</th>
-                  <th className="py-4 px-3 text-center">ชั้น/ห้อง</th>
-                  <th className="py-4 px-4">วิชาและชื่องาน</th>
-                  <th className="py-4 px-4 text-center">คะแนนที่ได้</th>
-                  <th className="py-4 px-4 text-center">สถานะ</th>
-                  <th className="py-4 px-4 text-center">ผลงาน</th>
-                  <th className="py-4 px-4 text-center">รายละเอียด</th>
+                <tr className="bg-gradient-to-r from-purple-50/80 via-indigo-50/70 to-pink-50/80 border-b border-purple-100 text-[11px] font-bold text-violet-900 uppercase tracking-wider">
+                  <th className="py-4 px-4 text-center w-14">🔢 เลขที่</th>
+                  <th className="py-4 px-4">🧑‍🎓 ผู้ส่งงาน</th>
+                  <th className="py-4 px-3 text-center">🏫 ชั้น/ห้อง</th>
+                  <th className="py-4 px-4">📚 วิชาและชื่องาน</th>
+                  <th className="py-4 px-4 text-center">💯 คะแนนที่ได้</th>
+                  <th className="py-4 px-4 text-center">🏷️ สถานะ</th>
+                  <th className="py-4 px-4 text-center">📎 ผลงาน</th>
+                  <th className="py-4 px-4 text-center">🔍 ข้อมูล</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-gray-100 text-sm">
+              <tbody className="divide-y divide-purple-100/50 text-sm">
                 {filteredSubmissions.map((item) => (
                   <tr 
                     key={item.id}
-                    className="hover:bg-indigo-50/30 transition-colors group"
+                    className="hover:bg-purple-50/40 transition-colors group"
                   >
                     {/* เลขที่ */}
                     <td className="py-4 px-4 text-center font-bold text-gray-700">
-                      <span className="w-8 h-8 rounded-full bg-gray-100 flex items-center justify-center mx-auto text-xs">
+                      <span className="w-8 h-8 rounded-xl bg-purple-100/80 text-violet-800 flex items-center justify-center mx-auto text-xs font-black shadow-xs">
                         {item.studentNumber}
                       </span>
                     </td>
 
                     {/* ผู้ส่งงาน */}
                     <td className="py-4 px-4">
-                      <div className="font-semibold text-gray-900 group-hover:text-indigo-600 transition-colors">
+                      <div className="font-semibold text-gray-900 group-hover:text-violet-700 transition-colors">
                         {item.studentName}
                       </div>
                       <div className="text-[11px] text-gray-400 flex items-center gap-1 mt-0.5">
-                        <Calendar size={11} /> {item.submittedAt}
+                        <Calendar size={11} className="text-violet-400" /> {item.submittedAt}
                       </div>
                     </td>
 
                     {/* ชั้น/ห้อง */}
                     <td className="py-4 px-3 text-center">
-                      <span className="inline-flex items-center px-2.5 py-1 rounded-lg text-xs font-bold bg-indigo-50 text-indigo-700 border border-indigo-100">
+                      <span className="inline-flex items-center px-2.5 py-1 rounded-xl text-xs font-bold bg-purple-100/70 text-violet-800 border border-purple-200/60 shadow-xs">
                         {item.gradeLevel}/{item.room}
                       </span>
                     </td>
@@ -412,12 +431,12 @@ export default function SubmissionStatusView({
                     {/* วิชาและชื่องาน */}
                     <td className="py-4 px-4 max-w-xs">
                       <div className="flex items-center gap-1.5 flex-wrap">
-                        <span className="text-xs font-semibold text-indigo-700 flex items-center gap-1">
+                        <span className="text-xs font-semibold text-violet-700 flex items-center gap-1">
                           <BookOpen size={12} />
                           {item.subjectCode} {item.subjectName}
                         </span>
                         {item.academicYear && (
-                          <span className="text-[10px] px-1.5 py-0.5 rounded bg-gray-100 text-gray-600 font-medium">
+                          <span className="text-[10px] px-1.5 py-0.5 rounded-md bg-purple-50 border border-purple-100 text-purple-700 font-medium">
                             ปี {item.academicYear}/{item.semester || '1'}
                           </span>
                         )}
@@ -438,8 +457,8 @@ export default function SubmissionStatusView({
                             <span>{item.score}</span>
                             <span className="text-xs text-gray-400 font-normal">/ {item.maxScore}</span>
                           </div>
-                          <span className="text-[10px] text-emerald-700 font-semibold bg-emerald-50 px-2 py-0.5 rounded-full">
-                            คะแนน
+                          <span className="text-[10px] text-emerald-800 font-semibold bg-emerald-100/80 px-2 py-0.5 rounded-full border border-emerald-200/60 shadow-xs">
+                            🌟 คะแนนที่ได้
                           </span>
                         </div>
                       ) : (
@@ -448,8 +467,8 @@ export default function SubmissionStatusView({
                             <span>-</span>
                             <span className="text-xs text-gray-400 font-normal">/ {item.maxScore}</span>
                           </div>
-                          <span className="text-[10px] text-amber-700 font-semibold bg-amber-50 px-2 py-0.5 rounded-full">
-                            รอการตรวจ
+                          <span className="text-[10px] text-amber-800 font-semibold bg-amber-100/80 px-2 py-0.5 rounded-full border border-amber-200/60 shadow-xs">
+                            ⏳ รอการตรวจ
                           </span>
                         </div>
                       )}
@@ -458,14 +477,14 @@ export default function SubmissionStatusView({
                     {/* สถานะการส่งงาน: "รอตรวจ" หรือ "ตรวจแล้ว" */}
                     <td className="py-4 px-4 text-center">
                       {item.status === 'ตรวจแล้ว' ? (
-                        <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-bold bg-emerald-100 text-emerald-800 border border-emerald-200 shadow-sm">
+                        <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-bold bg-emerald-100 text-emerald-800 border border-emerald-200 shadow-xs">
                           <CheckCircle size={14} className="text-emerald-600" />
-                          ตรวจแล้ว
+                          <span>ตรวจแล้ว</span>
                         </span>
                       ) : (
-                        <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-bold bg-amber-100 text-amber-800 border border-amber-200 shadow-sm animate-pulse">
+                        <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-bold bg-amber-100 text-amber-800 border border-amber-200 shadow-xs animate-pulse">
                           <Clock size={14} className="text-amber-600" />
-                          รอตรวจ
+                          <span>รอตรวจ</span>
                         </span>
                       )}
                     </td>
@@ -476,10 +495,10 @@ export default function SubmissionStatusView({
                         href={item.workUrl.startsWith('http') ? item.workUrl : `https://${item.workUrl}`}
                         target="_blank"
                         rel="noreferrer"
-                        className="inline-flex items-center gap-1 px-3 py-1.5 rounded-xl text-xs font-semibold bg-gray-100 hover:bg-indigo-600 hover:text-white text-gray-700 transition-all shadow-sm cursor-pointer"
+                        className="inline-flex items-center gap-1 px-3 py-1.5 rounded-xl text-xs font-semibold bg-gradient-to-r from-violet-50 to-indigo-50 border border-violet-200 hover:from-violet-600 hover:to-indigo-600 hover:text-white text-violet-800 transition-all shadow-xs cursor-pointer"
                       >
                         <ExternalLink size={13} />
-                        เปิดดูงาน
+                        <span>เปิดดูงาน</span>
                       </a>
                     </td>
 
@@ -487,9 +506,9 @@ export default function SubmissionStatusView({
                     <td className="py-4 px-4 text-center">
                       <button
                         onClick={() => setViewingDetail(item)}
-                        className="px-3 py-1.5 rounded-xl text-xs font-medium text-indigo-600 hover:bg-indigo-50 border border-indigo-200 transition-colors cursor-pointer"
+                        className="px-3 py-1.5 rounded-xl text-xs font-medium text-violet-700 hover:bg-violet-100/70 border border-purple-200 transition-colors cursor-pointer"
                       >
-                        ดูข้อมูล
+                        👁️ ดูข้อมูล
                       </button>
                     </td>
                   </tr>
@@ -505,14 +524,15 @@ export default function SubmissionStatusView({
       {/* Detail Modal */}
       {viewingDetail && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm animate-fade-in">
-          <div className="bg-white rounded-3xl max-w-lg w-full p-6 md:p-8 shadow-2xl border border-gray-100 space-y-6 relative">
+          <div className="bg-white/95 backdrop-blur-md rounded-3xl max-w-lg w-full p-6 md:p-8 shadow-2xl border border-purple-100 space-y-6 relative">
             <div className="flex items-start justify-between">
               <div>
-                <span className="text-xs font-bold text-indigo-600 uppercase tracking-widest">
-                  รายละเอียดการส่งงาน
+                <span className="text-xs font-bold text-violet-700 uppercase tracking-widest flex items-center gap-1">
+                  <span>✨</span> รายละเอียดการส่งงาน
                 </span>
-                <h3 className="text-xl font-bold text-gray-900 mt-1">
-                  {viewingDetail.studentName}
+                <h3 className="text-xl font-bold text-gray-900 mt-1 flex items-center gap-2">
+                  <span>{viewingDetail.studentName}</span>
+                  <span className="text-base">🧑‍🎓</span>
                 </h3>
                 <p className="text-xs text-gray-500">
                   เลขที่ {viewingDetail.studentNumber} • ชั้น {viewingDetail.gradeLevel}/{viewingDetail.room}
@@ -520,29 +540,29 @@ export default function SubmissionStatusView({
               </div>
               <button
                 onClick={() => setViewingDetail(null)}
-                className="w-8 h-8 rounded-full bg-gray-100 hover:bg-gray-200 text-gray-600 flex items-center justify-center text-sm font-bold cursor-pointer"
+                className="w-8 h-8 rounded-full bg-purple-50 hover:bg-purple-100 text-purple-700 flex items-center justify-center text-sm font-bold cursor-pointer transition-colors"
               >
                 ✕
               </button>
             </div>
 
             {/* Score Highlight Box */}
-            <div className="p-5 bg-gradient-to-br from-indigo-50 to-purple-50 rounded-2xl border border-indigo-100 flex items-center justify-between">
+            <div className="p-5 bg-gradient-to-br from-violet-50 via-purple-50 to-pink-50 rounded-2xl border border-purple-200/80 flex items-center justify-between shadow-xs">
               <div>
-                <div className="text-xs text-indigo-700 font-semibold">คะแนนที่ได้ / คะแนนเต็ม</div>
-                <div className="text-3xl font-black text-indigo-950 mt-1">
+                <div className="text-xs text-violet-800 font-semibold">คะแนนที่ได้ / คะแนนเต็ม</div>
+                <div className="text-3xl font-black text-violet-950 mt-1">
                   {viewingDetail.score !== null ? viewingDetail.score : '-'} 
                   <span className="text-base text-gray-400 font-normal"> / {viewingDetail.maxScore} คะแนน</span>
                 </div>
               </div>
               <div>
                 {viewingDetail.status === 'ตรวจแล้ว' ? (
-                  <span className="px-3 py-1.5 rounded-full text-xs font-bold bg-emerald-100 text-emerald-800 border border-emerald-200 flex items-center gap-1">
-                    <CheckCircle size={14} /> ตรวจแล้ว
+                  <span className="px-3.5 py-1.5 rounded-full text-xs font-bold bg-emerald-100 text-emerald-800 border border-emerald-200 flex items-center gap-1 shadow-xs">
+                    <CheckCircle size={14} className="text-emerald-600" /> ตรวจแล้ว
                   </span>
                 ) : (
-                  <span className="px-3 py-1.5 rounded-full text-xs font-bold bg-amber-100 text-amber-800 border border-amber-200 flex items-center gap-1">
-                    <Clock size={14} /> รอตรวจ
+                  <span className="px-3.5 py-1.5 rounded-full text-xs font-bold bg-amber-100 text-amber-800 border border-amber-200 flex items-center gap-1 shadow-xs">
+                    <Clock size={14} className="text-amber-600" /> รอตรวจ
                   </span>
                 )}
               </div>

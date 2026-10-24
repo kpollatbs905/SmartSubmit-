@@ -348,36 +348,41 @@ export default function TeacherPortalView({
   if (!activeTeacher) {
     return (
       <div className="max-w-xl mx-auto space-y-6">
-        <div className="bg-white/95 backdrop-blur-md rounded-3xl p-6 md:p-8 shadow-xl border border-white/60 text-center">
-          <div className="w-16 h-16 rounded-2xl bg-indigo-600 text-white flex items-center justify-center mx-auto mb-4 shadow-lg shadow-indigo-200">
-            <GraduationCap size={32} />
+        <div className="bg-gradient-to-r from-white/95 via-purple-50/60 to-pink-50/60 backdrop-blur-md rounded-3xl p-6 md:p-8 shadow-xl shadow-purple-100/40 border border-purple-100/80 text-center">
+          <div className="w-16 h-16 rounded-2xl bg-gradient-to-tr from-violet-500 via-indigo-500 to-pink-500 text-white flex items-center justify-center mx-auto mb-4 shadow-lg shadow-purple-200 text-3xl">
+            👩‍🏫
           </div>
-          <h1 className="text-2xl font-bold text-gray-900">ระบบสำหรับครูผู้สอน</h1>
+          <h1 className="text-2xl font-bold text-gray-900 flex items-center justify-center gap-2">
+            <span>ระบบสำหรับครูผู้สอน</span>
+            <span>✨</span>
+          </h1>
           <p className="text-xs text-gray-500 mt-1">
-            โรงเรียนท่าบ่อ สพม.หนองคาย • เข้าสู่ระบบหรือลงทะเบียนเพื่อจัดการใบงานและตรวจงานนักเรียน
+            โรงเรียนท่าบ่อ สพม.หนองคาย • เข้าสู่ระบบหรือลงทะเบียนเพื่อจัดการใบงานและตรวจงานนักเรียน 🌸
           </p>
 
           {/* Toggle Login / Register */}
-          <div className="flex bg-gray-100 p-1.5 rounded-2xl mt-6 max-w-xs mx-auto">
+          <div className="flex bg-purple-100/60 p-1.5 rounded-2xl mt-6 max-w-xs mx-auto border border-purple-200/50">
             <button
               onClick={() => setAuthMode('login')}
-              className={`flex-1 py-2 text-xs font-bold rounded-xl transition-all cursor-pointer ${
+              className={`flex-1 py-2 text-xs font-bold rounded-xl transition-all cursor-pointer flex items-center justify-center gap-1.5 ${
                 authMode === 'login'
-                  ? 'bg-white text-indigo-600 shadow-sm'
-                  : 'text-gray-500 hover:text-gray-900'
+                  ? 'bg-white text-violet-700 shadow-sm'
+                  : 'text-gray-600 hover:text-gray-900'
               }`}
             >
-              เข้าสู่ระบบ (Login)
+              <span>🔐</span>
+              <span>เข้าสู่ระบบ</span>
             </button>
             <button
               onClick={() => setAuthMode('register')}
-              className={`flex-1 py-2 text-xs font-bold rounded-xl transition-all cursor-pointer ${
+              className={`flex-1 py-2 text-xs font-bold rounded-xl transition-all cursor-pointer flex items-center justify-center gap-1.5 ${
                 authMode === 'register'
-                  ? 'bg-white text-indigo-600 shadow-sm'
-                  : 'text-gray-500 hover:text-gray-900'
+                  ? 'bg-white text-violet-700 shadow-sm'
+                  : 'text-gray-600 hover:text-gray-900'
               }`}
             >
-              ลงทะเบียนครูใหม่
+              <span>✍️</span>
+              <span>ลงทะเบียนใหม่</span>
             </button>
           </div>
         </div>
@@ -386,16 +391,17 @@ export default function TeacherPortalView({
           /* LOGIN FORM */
           <form
             onSubmit={handleLogin}
-            className="bg-white/95 backdrop-blur-md rounded-3xl p-6 md:p-8 shadow-xl border border-white/60 space-y-5"
+            className="bg-white/95 backdrop-blur-md rounded-3xl p-6 md:p-8 shadow-xl shadow-purple-100/30 border border-purple-100/70 space-y-5"
           >
-            <div className="border-b border-gray-100 pb-3 flex items-center gap-2">
-              <LogIn className="text-indigo-600" size={20} />
+            <div className="border-b border-purple-100/70 pb-3 flex items-center gap-2">
+              <span className="text-xl">🔐</span>
               <h2 className="text-lg font-bold text-gray-800">เข้าสู่ระบบครูผู้สอน</h2>
             </div>
 
             <div>
-              <label className="block text-xs font-semibold text-gray-700 mb-1.5">
-                Username (ชื่อผู้ใช้)
+              <label className="block text-xs font-semibold text-gray-700 mb-1.5 flex items-center gap-1.5">
+                <span>👤</span>
+                <span>Username (ชื่อผู้ใช้)</span>
               </label>
               <input
                 type="text"
@@ -403,13 +409,14 @@ export default function TeacherPortalView({
                 value={loginUsername}
                 onChange={(e) => setLoginUsername(e.target.value)}
                 placeholder="ระบุ username (เช่น teacher)"
-                className="w-full px-4 py-3 rounded-xl border border-gray-200 bg-white text-gray-800 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 shadow-sm"
+                className="w-full px-4 py-3 rounded-xl border border-purple-200/80 bg-purple-50/20 focus:bg-white text-gray-800 text-sm focus:outline-none focus:ring-2 focus:ring-purple-300 focus:border-purple-400 shadow-xs"
               />
             </div>
 
             <div>
-              <label className="block text-xs font-semibold text-gray-700 mb-1.5">
-                Password (รหัสผ่าน)
+              <label className="block text-xs font-semibold text-gray-700 mb-1.5 flex items-center gap-1.5">
+                <span>🔑</span>
+                <span>Password (รหัสผ่าน)</span>
               </label>
               <input
                 type="password"
@@ -417,36 +424,39 @@ export default function TeacherPortalView({
                 value={loginPassword}
                 onChange={(e) => setLoginPassword(e.target.value)}
                 placeholder="ระบุรหัสผ่าน (เช่น 1234)"
-                className="w-full px-4 py-3 rounded-xl border border-gray-200 bg-white text-gray-800 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 shadow-sm"
+                className="w-full px-4 py-3 rounded-xl border border-purple-200/80 bg-purple-50/20 focus:bg-white text-gray-800 text-sm focus:outline-none focus:ring-2 focus:ring-purple-300 focus:border-purple-400 shadow-xs"
               />
             </div>
 
-            <div className="p-3 bg-indigo-50/70 border border-indigo-100 rounded-xl text-xs text-indigo-700">
-              💡 บัญชีทดสอบเริ่มต้น: Username = <strong>teacher</strong> | Password = <strong>1234</strong>
+            <div className="p-3.5 bg-gradient-to-r from-violet-50 to-purple-50 border border-purple-100 rounded-2xl text-xs text-violet-800 shadow-xs flex items-center gap-2">
+              <span className="text-base">💡</span>
+              <span>บัญชีทดสอบเริ่มต้น: Username = <strong>teacher</strong> | Password = <strong>1234</strong></span>
             </div>
 
             <button
               type="submit"
-              className="w-full py-3.5 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-2xl shadow-lg shadow-indigo-200 flex items-center justify-center gap-2 transition-all cursor-pointer"
+              className="w-full py-3.5 bg-gradient-to-r from-violet-600 via-indigo-600 to-purple-600 hover:from-violet-700 hover:via-indigo-700 hover:to-purple-700 text-white font-bold rounded-2xl shadow-lg shadow-purple-200/80 flex items-center justify-center gap-2 transition-all cursor-pointer"
             >
               <LogIn size={18} />
-              เข้าสู่ระบบ
+              <span>เข้าสู่ระบบ ✨</span>
             </button>
           </form>
         ) : (
           /* REGISTER FORM */
           <form
             onSubmit={handleRegister}
-            className="bg-white/95 backdrop-blur-md rounded-3xl p-6 md:p-8 shadow-xl border border-white/60 space-y-5"
+            className="bg-white/95 backdrop-blur-md rounded-3xl p-6 md:p-8 shadow-xl shadow-purple-100/30 border border-purple-100/70 space-y-5"
           >
-            <div className="border-b border-gray-100 pb-3 flex items-center gap-2">
-              <UserPlus className="text-indigo-600" size={20} />
+            <div className="border-b border-purple-100/70 pb-3 flex items-center gap-2">
+              <span className="text-xl">✍️</span>
               <h2 className="text-lg font-bold text-gray-800">ลงทะเบียนครูผู้สอนใหม่</h2>
             </div>
 
             <div>
-              <label className="block text-xs font-semibold text-gray-700 mb-1.5">
-                ชื่อและนามสกุล ครูผู้สอน <span className="text-red-500">*</span>
+              <label className="block text-xs font-semibold text-gray-700 mb-1.5 flex items-center gap-1.5">
+                <span>👤</span>
+                <span>ชื่อและนามสกุล ครูผู้สอน</span>
+                <span className="text-pink-500 font-bold">*</span>
               </label>
               <input
                 type="text"
@@ -454,18 +464,20 @@ export default function TeacherPortalView({
                 value={regFullName}
                 onChange={(e) => setRegFullName(e.target.value)}
                 placeholder="เช่น ครูชมัยพร ถิ่นสำราญ"
-                className="w-full px-4 py-3 rounded-xl border border-gray-200 bg-white text-gray-800 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 shadow-sm"
+                className="w-full px-4 py-3 rounded-xl border border-purple-200/80 bg-purple-50/20 focus:bg-white text-gray-800 text-sm focus:outline-none focus:ring-2 focus:ring-purple-300 focus:border-purple-400 shadow-xs"
               />
             </div>
 
             <div>
-              <label className="block text-xs font-semibold text-gray-700 mb-1.5">
-                กลุ่มสาระการเรียนรู้ <span className="text-red-500">*</span>
+              <label className="block text-xs font-semibold text-gray-700 mb-1.5 flex items-center gap-1.5">
+                <span>📚</span>
+                <span>กลุ่มสาระการเรียนรู้</span>
+                <span className="text-pink-500 font-bold">*</span>
               </label>
               <select
                 value={regDepartment}
                 onChange={(e) => setRegDepartment(e.target.value)}
-                className="w-full px-4 py-3 rounded-xl border border-gray-200 bg-white text-gray-800 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 shadow-sm cursor-pointer"
+                className="w-full px-4 py-3 rounded-xl border border-purple-200/80 bg-purple-50/20 focus:bg-white text-gray-800 text-sm focus:outline-none focus:ring-2 focus:ring-purple-300 focus:border-purple-400 shadow-xs cursor-pointer"
               >
                 {DEPARTMENTS.map((dept) => (
                   <option key={dept} value={dept}>
@@ -477,8 +489,10 @@ export default function TeacherPortalView({
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div>
-                <label className="block text-xs font-semibold text-gray-700 mb-1.5">
-                  Username <span className="text-red-500">*</span>
+                <label className="block text-xs font-semibold text-gray-700 mb-1.5 flex items-center gap-1.5">
+                  <span>🆔</span>
+                  <span>Username</span>
+                  <span className="text-pink-500 font-bold">*</span>
                 </label>
                 <input
                   type="text"
@@ -486,13 +500,15 @@ export default function TeacherPortalView({
                   value={regUsername}
                   onChange={(e) => setRegUsername(e.target.value)}
                   placeholder="เช่น chamaiporn"
-                  className="w-full px-4 py-3 rounded-xl border border-gray-200 bg-white text-gray-800 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 shadow-sm"
+                  className="w-full px-4 py-3 rounded-xl border border-purple-200/80 bg-purple-50/20 focus:bg-white text-gray-800 text-sm focus:outline-none focus:ring-2 focus:ring-purple-300 focus:border-purple-400 shadow-xs"
                 />
               </div>
 
               <div>
-                <label className="block text-xs font-semibold text-gray-700 mb-1.5">
-                  Password <span className="text-red-500">*</span>
+                <label className="block text-xs font-semibold text-gray-700 mb-1.5 flex items-center gap-1.5">
+                  <span>🔒</span>
+                  <span>Password</span>
+                  <span className="text-pink-500 font-bold">*</span>
                 </label>
                 <input
                   type="password"
@@ -500,17 +516,17 @@ export default function TeacherPortalView({
                   value={regPassword}
                   onChange={(e) => setRegPassword(e.target.value)}
                   placeholder="รหัสผ่านอย่างน้อย 4 ตัวอักษร"
-                  className="w-full px-4 py-3 rounded-xl border border-gray-200 bg-white text-gray-800 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 shadow-sm"
+                  className="w-full px-4 py-3 rounded-xl border border-purple-200/80 bg-purple-50/20 focus:bg-white text-gray-800 text-sm focus:outline-none focus:ring-2 focus:ring-purple-300 focus:border-purple-400 shadow-xs"
                 />
               </div>
             </div>
 
             <button
               type="submit"
-              className="w-full py-3.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-2xl shadow-lg shadow-emerald-200 flex items-center justify-center gap-2 transition-all cursor-pointer"
+              className="w-full py-3.5 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 text-white font-bold rounded-2xl shadow-lg shadow-emerald-200/80 flex items-center justify-center gap-2 transition-all cursor-pointer"
             >
               <UserPlus size={18} />
-              ยืนยันการลงทะเบียน
+              <span>ยืนยันการลงทะเบียนครูใหม่ ✨</span>
             </button>
           </form>
         )}
@@ -524,18 +540,20 @@ export default function TeacherPortalView({
   return (
     <div className="max-w-7xl mx-auto space-y-6">
       {/* Teacher Top Bar */}
-      <div className="bg-white/95 backdrop-blur-md rounded-3xl p-6 md:p-8 shadow-xl border border-white/60">
+      <div className="bg-gradient-to-r from-white/95 via-purple-50/60 to-pink-50/60 backdrop-blur-md rounded-3xl p-6 md:p-8 shadow-xl shadow-purple-100/40 border border-purple-100/80">
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
           <div className="flex items-center gap-4">
-            <div className="w-14 h-14 rounded-2xl bg-gradient-to-tr from-indigo-600 to-indigo-700 text-white flex items-center justify-center font-bold text-xl shadow-lg shadow-indigo-200">
+            <div className="w-14 h-14 rounded-2xl bg-gradient-to-tr from-violet-500 via-indigo-500 to-pink-500 text-white flex items-center justify-center font-bold text-2xl shadow-lg shadow-purple-200">
               {activeTeacher.fullName.charAt(0) || 'ค'}
             </div>
             <div>
-              <div className="inline-flex items-center gap-1.5 px-3 py-0.5 bg-indigo-50 text-indigo-700 border border-indigo-200 rounded-full text-[11px] font-semibold mb-1">
-                <ShieldCheck size={12} /> เข้าสู่ระบบในฐานะครูผู้สอน
+              <div className="inline-flex items-center gap-1.5 px-3 py-0.5 bg-violet-100/80 text-violet-800 border border-violet-200 rounded-full text-[11px] font-semibold mb-1 shadow-xs">
+                <span>👩‍🏫</span>
+                <span>เข้าสู่ระบบในฐานะครูผู้สอน</span>
               </div>
-              <h1 className="text-xl md:text-2xl font-bold text-gray-900">
-                {activeTeacher.fullName}
+              <h1 className="text-xl md:text-2xl font-bold text-gray-900 flex items-center gap-2">
+                <span>{activeTeacher.fullName}</span>
+                <span>🌸</span>
               </h1>
               <p className="text-xs text-gray-500">
                 {activeTeacher.department}
@@ -545,34 +563,37 @@ export default function TeacherPortalView({
 
           <div className="flex flex-wrap items-center gap-2.5">
             {/* Sub-tabs: ตรวจงาน / จัดการงาน */}
-            <div className="flex bg-gray-100 p-1 rounded-xl">
+            <div className="flex bg-purple-100/60 p-1 rounded-xl border border-purple-200/60">
               <button
                 onClick={() => setTeacherTab('grade')}
                 className={`px-4 py-2 text-xs font-bold rounded-lg transition-all cursor-pointer flex items-center gap-1.5 ${
                   teacherTab === 'grade'
-                    ? 'bg-white text-indigo-600 shadow-sm'
+                    ? 'bg-white text-violet-800 shadow-xs'
                     : 'text-gray-600 hover:text-gray-900'
                 }`}
               >
-                <CheckSquare size={14} /> เมนูตรวจงาน
+                <span>📝</span>
+                <span>เมนูตรวจงาน</span>
               </button>
               <button
                 onClick={() => setTeacherTab('assignments')}
                 className={`px-4 py-2 text-xs font-bold rounded-lg transition-all cursor-pointer flex items-center gap-1.5 ${
                   teacherTab === 'assignments'
-                    ? 'bg-white text-indigo-600 shadow-sm'
+                    ? 'bg-white text-violet-800 shadow-xs'
                     : 'text-gray-600 hover:text-gray-900'
                 }`}
               >
-                <Plus size={14} /> เพิ่ม/จัดการงาน
+                <span>📋</span>
+                <span>เพิ่ม/จัดการงาน</span>
               </button>
             </div>
 
             <button
               onClick={handleLogout}
-              className="px-3.5 py-2 text-xs font-semibold text-red-600 hover:bg-red-50 border border-red-200 rounded-xl transition-colors flex items-center gap-1.5 cursor-pointer"
+              className="px-3.5 py-2 text-xs font-semibold text-rose-700 hover:bg-rose-50 border border-rose-200 rounded-xl transition-colors flex items-center gap-1.5 cursor-pointer shadow-xs"
             >
-              <LogOut size={14} /> ออกจากระบบ
+              <LogOut size={14} />
+              <span>ออกจากระบบ</span>
             </button>
           </div>
         </div>
@@ -582,10 +603,10 @@ export default function TeacherPortalView({
       {teacherTab === 'grade' && (
         <div className="space-y-6">
           {/* Filter Bar */}
-          <div className="bg-white/95 backdrop-blur-md rounded-3xl p-6 shadow-xl border border-white/60 space-y-4">
+          <div className="bg-white/95 backdrop-blur-md rounded-3xl p-6 shadow-xl shadow-purple-100/30 border border-purple-100/70 space-y-4">
             <div className="flex flex-col md:flex-row items-center justify-between gap-4">
               <div className="flex items-center gap-2">
-                <Filter size={18} className="text-indigo-600" />
+                <span className="text-xl">🎯</span>
                 <h2 className="text-base font-bold text-gray-800">
                   กรองรายการส่งงานเพื่อตรวจให้คะแนน
                 </h2>
@@ -595,17 +616,17 @@ export default function TeacherPortalView({
               <div className="flex items-center gap-2">
                 <button
                   onClick={handleExportExcel}
-                  className="flex items-center gap-1.5 px-3.5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-semibold shadow-sm shadow-emerald-200 transition-all cursor-pointer"
+                  className="flex items-center gap-1.5 px-3.5 py-2 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 text-white rounded-xl text-xs font-semibold shadow-xs shadow-emerald-200 transition-all cursor-pointer"
                 >
                   <FileSpreadsheet size={14} />
-                  <span>ส่งออก Excel</span>
+                  <span>📊 ส่งออก Excel</span>
                 </button>
                 <button
                   onClick={handleExportPdf}
-                  className="flex items-center gap-1.5 px-3.5 py-2 bg-red-600 hover:bg-red-700 text-white rounded-xl text-xs font-semibold shadow-sm shadow-red-200 transition-all cursor-pointer"
+                  className="flex items-center gap-1.5 px-3.5 py-2 bg-gradient-to-r from-rose-500 to-pink-600 hover:from-rose-600 hover:to-pink-700 text-white rounded-xl text-xs font-semibold shadow-xs shadow-pink-200 transition-all cursor-pointer"
                 >
                   <FileDown size={14} />
-                  <span>ส่งออก PDF</span>
+                  <span>📄 ส่งออก PDF</span>
                 </button>
               </div>
             </div>
@@ -613,18 +634,19 @@ export default function TeacherPortalView({
             <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3 pt-2">
               {/* ปีการศึกษา */}
               <div>
-                <label className="block text-[11px] font-semibold text-gray-600 mb-1">
-                  ปีการศึกษา
+                <label className="block text-[11px] font-semibold text-gray-700 mb-1 flex items-center gap-1">
+                  <span>📅</span>
+                  <span>ปีการศึกษา</span>
                 </label>
                 <select
                   value={filterYear}
                   onChange={(e) => setFilterYear(e.target.value)}
-                  className="w-full px-2.5 py-2 bg-gray-50 border border-gray-200 rounded-xl text-xs font-medium text-gray-800 cursor-pointer"
+                  className="w-full px-2.5 py-2 bg-purple-50/20 border border-purple-200/80 rounded-xl text-xs font-medium text-gray-800 cursor-pointer focus:outline-none focus:ring-2 focus:ring-purple-300"
                 >
                   <option value="ALL">-- ทุกปี --</option>
                   {ACADEMIC_YEARS.map((y) => (
                     <option key={y} value={y}>
-                      {y}
+                      ปี {y}
                     </option>
                   ))}
                 </select>
@@ -632,13 +654,14 @@ export default function TeacherPortalView({
 
               {/* ภาคเรียน */}
               <div>
-                <label className="block text-[11px] font-semibold text-gray-600 mb-1">
-                  ภาคเรียน
+                <label className="block text-[11px] font-semibold text-gray-700 mb-1 flex items-center gap-1">
+                  <span>📆</span>
+                  <span>ภาคเรียน</span>
                 </label>
                 <select
                   value={filterSemester}
                   onChange={(e) => setFilterSemester(e.target.value)}
-                  className="w-full px-2.5 py-2 bg-gray-50 border border-gray-200 rounded-xl text-xs font-medium text-gray-800 cursor-pointer"
+                  className="w-full px-2.5 py-2 bg-purple-50/20 border border-purple-200/80 rounded-xl text-xs font-medium text-gray-800 cursor-pointer focus:outline-none focus:ring-2 focus:ring-purple-300"
                 >
                   <option value="ALL">-- ทุกเทอม --</option>
                   {SEMESTERS.map((s) => (
@@ -651,13 +674,14 @@ export default function TeacherPortalView({
 
               {/* เลือกวิชา */}
               <div>
-                <label className="block text-[11px] font-semibold text-gray-600 mb-1">
-                  เลือกวิชา
+                <label className="block text-[11px] font-semibold text-gray-700 mb-1 flex items-center gap-1">
+                  <span>📚</span>
+                  <span>เลือกวิชา</span>
                 </label>
                 <select
                   value={filterSubject}
                   onChange={(e) => setFilterSubject(e.target.value)}
-                  className="w-full px-2.5 py-2 bg-gray-50 border border-gray-200 rounded-xl text-xs font-medium text-gray-800 cursor-pointer"
+                  className="w-full px-2.5 py-2 bg-purple-50/20 border border-purple-200/80 rounded-xl text-xs font-medium text-gray-800 cursor-pointer focus:outline-none focus:ring-2 focus:ring-purple-300"
                 >
                   <option value="ALL">-- ทุกวิชา --</option>
                   {teacherSubjects.map(([code, label]) => (
@@ -670,13 +694,14 @@ export default function TeacherPortalView({
 
               {/* ชั้นที่สอน */}
               <div>
-                <label className="block text-[11px] font-semibold text-gray-600 mb-1">
-                  ชั้นที่สอน (ม.1-ม.6)
+                <label className="block text-[11px] font-semibold text-gray-700 mb-1 flex items-center gap-1">
+                  <span>🏫</span>
+                  <span>ชั้นที่สอน</span>
                 </label>
                 <select
                   value={filterGrade}
                   onChange={(e) => setFilterGrade(e.target.value)}
-                  className="w-full px-2.5 py-2 bg-gray-50 border border-gray-200 rounded-xl text-xs font-medium text-gray-800 cursor-pointer"
+                  className="w-full px-2.5 py-2 bg-purple-50/20 border border-purple-200/80 rounded-xl text-xs font-medium text-gray-800 cursor-pointer focus:outline-none focus:ring-2 focus:ring-purple-300"
                 >
                   <option value="ALL">-- ทุกชั้น --</option>
                   {GRADE_LEVELS.map((g) => (
@@ -689,13 +714,14 @@ export default function TeacherPortalView({
 
               {/* ห้องที่สอน */}
               <div>
-                <label className="block text-[11px] font-semibold text-gray-600 mb-1">
-                  ห้องที่สอน (1-14)
+                <label className="block text-[11px] font-semibold text-gray-700 mb-1 flex items-center gap-1">
+                  <span>🚪</span>
+                  <span>ห้องที่สอน</span>
                 </label>
                 <select
                   value={filterRoom}
                   onChange={(e) => setFilterRoom(e.target.value)}
-                  className="w-full px-2.5 py-2 bg-gray-50 border border-gray-200 rounded-xl text-xs font-medium text-gray-800 cursor-pointer"
+                  className="w-full px-2.5 py-2 bg-purple-50/20 border border-purple-200/80 rounded-xl text-xs font-medium text-gray-800 cursor-pointer focus:outline-none focus:ring-2 focus:ring-purple-300"
                 >
                   <option value="ALL">-- ทุกห้อง --</option>
                   {ROOMS.map((r) => (
@@ -708,13 +734,14 @@ export default function TeacherPortalView({
 
               {/* สถานะการตรวจ */}
               <div>
-                <label className="block text-[11px] font-semibold text-gray-600 mb-1">
-                  สถานะการตรวจ
+                <label className="block text-[11px] font-semibold text-gray-700 mb-1 flex items-center gap-1">
+                  <span>🏷️</span>
+                  <span>สถานะการตรวจ</span>
                 </label>
                 <select
                   value={filterStatus}
                   onChange={(e) => setFilterStatus(e.target.value)}
-                  className="w-full px-2.5 py-2 bg-gray-50 border border-gray-200 rounded-xl text-xs font-medium text-gray-800 cursor-pointer"
+                  className="w-full px-2.5 py-2 bg-purple-50/20 border border-purple-200/80 rounded-xl text-xs font-medium text-gray-800 cursor-pointer focus:outline-none focus:ring-2 focus:ring-purple-300"
                 >
                   <option value="ALL">-- ทุกสถานะ --</option>
                   <option value="รอตรวจ">⏳ รอตรวจ</option>
@@ -724,14 +751,17 @@ export default function TeacherPortalView({
             </div>
 
             {/* Active Filter Summary Bar */}
-            <div className="flex flex-wrap items-center justify-between gap-2 p-2.5 bg-indigo-50/60 rounded-2xl border border-indigo-100 text-xs">
-              <div className="flex items-center gap-2 text-indigo-900">
-                <span className="font-bold">ข้อมูลที่กรอง:</span>
-                <span>
+            <div className="flex flex-wrap items-center justify-between gap-2 p-2.5 bg-gradient-to-r from-violet-50 via-purple-50 to-pink-50 rounded-2xl border border-purple-200/70 text-xs shadow-xs">
+              <div className="flex items-center gap-2 text-violet-950 flex-wrap">
+                <span className="font-bold flex items-center gap-1">
+                  <span>🎯</span>
+                  <span>ข้อมูลที่กรอง:</span>
+                </span>
+                <span className="text-gray-700">
                   {filterYear !== 'ALL' ? `ปี ${filterYear}` : 'ทุกปี'} • {filterSemester !== 'ALL' ? `เทอม ${filterSemester}` : 'ทุกเทอม'} • {filterSubject !== 'ALL' ? filterSubject : 'ทุกวิชา'} • {filterGrade !== 'ALL' ? filterGrade : 'ทุกชั้น'} • {filterRoom !== 'ALL' ? `ห้อง ${filterRoom}` : 'ทุกห้อง'}
                 </span>
-                <span className="bg-indigo-600 text-white font-bold px-2 py-0.5 rounded-full text-[10px]">
-                  พบ {teacherSubmissions.length} รายการ
+                <span className="bg-gradient-to-r from-violet-600 to-indigo-600 text-white font-bold px-2.5 py-0.5 rounded-full text-[10px] shadow-xs">
+                  ✨ พบ {teacherSubmissions.length} รายการ
                 </span>
               </div>
 
@@ -746,9 +776,10 @@ export default function TeacherPortalView({
                     setFilterRoom('ALL');
                     setFilterStatus('ALL');
                   }}
-                  className="text-xs text-indigo-600 font-bold hover:underline cursor-pointer"
+                  className="text-xs text-violet-700 font-bold hover:underline cursor-pointer flex items-center gap-1"
                 >
-                  ล้างตัวกรองทั้งหมด
+                  <span>ล้างตัวกรองทั้งหมด</span>
+                  <span>✕</span>
                 </button>
               )}
             </div>
@@ -756,13 +787,13 @@ export default function TeacherPortalView({
             {/* ค้นหาเพิ่มเติม */}
             <div className="pt-2">
               <div className="relative">
-                <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={16} />
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-violet-500" size={16} />
                 <input
                   type="text"
                   value={gradingSearch}
                   onChange={(e) => setGradingSearch(e.target.value)}
-                  placeholder="ค้นหาชื่อนักเรียน, เลขที่ หรือชื่องาน..."
-                  className="w-full pl-9 pr-4 py-2 bg-gray-50 border border-gray-200 rounded-xl text-xs text-gray-800 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                  placeholder="🔍 ค้นหาชื่อนักเรียน, เลขที่ หรือชื่องาน..."
+                  className="w-full pl-9 pr-4 py-2.5 bg-purple-50/20 border border-purple-200/80 rounded-xl text-xs text-gray-800 focus:outline-none focus:ring-2 focus:ring-purple-300"
                 />
               </div>
             </div>

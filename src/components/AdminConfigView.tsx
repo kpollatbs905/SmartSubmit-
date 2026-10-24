@@ -215,52 +215,56 @@ export default function AdminConfigView({
   return (
     <div className="max-w-6xl mx-auto space-y-6">
       {/* Header Banner */}
-      <div className="bg-white/95 backdrop-blur-md rounded-3xl p-6 md:p-8 shadow-xl border border-white/60">
+      <div className="bg-gradient-to-r from-white/95 via-purple-50/60 to-pink-50/60 backdrop-blur-md rounded-3xl p-6 md:p-8 shadow-xl shadow-purple-100/40 border border-purple-100/80">
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
           <div>
-            <div className="inline-flex items-center gap-1.5 px-3 py-1 bg-amber-50 text-amber-800 border border-amber-200 rounded-full text-xs font-semibold mb-2">
-              <ShieldCheck size={14} className="text-amber-600" />
-              ส่วนจัดการระบบและฐานข้อมูล (ADMIN)
+            <div className="inline-flex items-center gap-1.5 px-3 py-1 bg-amber-100/80 text-amber-900 border border-amber-200 rounded-full text-xs font-semibold mb-2 shadow-xs">
+              <span>🔒</span>
+              <span>ส่วนจัดการระบบและฐานข้อมูล (ADMIN)</span>
             </div>
-            <h1 className="text-2xl md:text-3xl font-bold text-gray-900">
-              ระบบจัดการข้อมูลและตั้งค่า Google Sheets
+            <h1 className="text-2xl md:text-3xl font-bold text-gray-900 flex items-center gap-2">
+              <span>ระบบจัดการข้อมูลและตั้งค่าชีต</span>
+              <span>⚙️</span>
             </h1>
             <p className="text-xs md:text-sm text-gray-500 mt-1">
-              โรงเรียนท่าบ่อ • จัดการค้นหาและลบข้อมูลนักเรียน ข้อมูลครูผู้สอน และตั้งค่าเชื่อมต่อ Apps Script
+              โรงเรียนท่าบ่อ • จัดการค้นหาและลบข้อมูลนักเรียน ข้อมูลครูผู้สอน และตั้งค่าเชื่อมต่อ Apps Script 🌸
             </p>
           </div>
 
           {/* Sub Navigation Tabs */}
-          <div className="flex flex-wrap bg-gray-100 p-1.5 rounded-2xl gap-1">
+          <div className="flex flex-wrap bg-purple-100/60 p-1.5 rounded-2xl gap-1 border border-purple-200/60">
             <button
               onClick={() => setAdminTab('students')}
-              className={`px-4 py-2 text-xs font-bold rounded-xl transition-all cursor-pointer flex items-center gap-1.5 ${
+              className={`px-3.5 py-2 text-xs font-bold rounded-xl transition-all cursor-pointer flex items-center gap-1.5 ${
                 adminTab === 'students'
-                  ? 'bg-white text-indigo-600 shadow-sm'
+                  ? 'bg-white text-violet-800 shadow-xs'
                   : 'text-gray-600 hover:text-gray-900'
               }`}
             >
-              <Users size={14} /> ลบข้อมูลนักเรียน ({submissions.length})
+              <span>🧑‍🎓</span>
+              <span>ลบข้อมูลนักเรียน ({submissions.length})</span>
             </button>
             <button
               onClick={() => setAdminTab('teachers')}
-              className={`px-4 py-2 text-xs font-bold rounded-xl transition-all cursor-pointer flex items-center gap-1.5 ${
+              className={`px-3.5 py-2 text-xs font-bold rounded-xl transition-all cursor-pointer flex items-center gap-1.5 ${
                 adminTab === 'teachers'
-                  ? 'bg-white text-indigo-600 shadow-sm'
+                  ? 'bg-white text-violet-800 shadow-xs'
                   : 'text-gray-600 hover:text-gray-900'
               }`}
             >
-              <GraduationCap size={14} /> ลบข้อมูลครู ({teachers.length})
+              <span>👩‍🏫</span>
+              <span>ลบข้อมูลครู ({teachers.length})</span>
             </button>
             <button
               onClick={() => setAdminTab('config')}
-              className={`px-4 py-2 text-xs font-bold rounded-xl transition-all cursor-pointer flex items-center gap-1.5 ${
+              className={`px-3.5 py-2 text-xs font-bold rounded-xl transition-all cursor-pointer flex items-center gap-1.5 ${
                 adminTab === 'config'
-                  ? 'bg-white text-indigo-600 shadow-sm'
+                  ? 'bg-white text-violet-800 shadow-xs'
                   : 'text-gray-600 hover:text-gray-900'
               }`}
             >
-              <Database size={14} /> ตั้งค่าชีต & โค้ด GS
+              <span>⚙️</span>
+              <span>ตั้งค่าชีต & โค้ด GS</span>
             </button>
           </div>
         </div>
