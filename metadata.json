@@ -1,0 +1,10 @@
+{
+  "name": "AI Smart Teacher Assistant",
+  "description": "An intelligent classroom management system for teachers and students, featuring AI-powered assignment feedback and student risk analysis.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "AI-powered grading assistant",
+    "Student risk level analysis",
+    "Real-time feedback for students"
+  ]
+}
