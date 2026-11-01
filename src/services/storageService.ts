@@ -3,14 +3,15 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { Submission, Teacher, Assignment, GoogleSheetConfig } from '../types';
-import { INITIAL_SUBMISSIONS, INITIAL_TEACHERS, INITIAL_ASSIGNMENTS, DEFAULT_SHEET_CONFIG } from '../constants';
+import { Submission, Teacher, Assignment, Subject, GoogleSheetConfig, GradeLevel } from '../types';
+import { INITIAL_SUBMISSIONS, INITIAL_TEACHERS, INITIAL_ASSIGNMENTS, INITIAL_SUBJECTS, DEFAULT_SHEET_CONFIG } from '../constants';
 import * as XLSX from 'xlsx';
 
 const STORAGE_KEYS = {
   SUBMISSIONS: 'tha_bo_submissions_v2',
   TEACHERS: 'tha_bo_teachers_v2',
   ASSIGNMENTS: 'tha_bo_assignments_v2',
+  SUBJECTS: 'tha_bo_subjects_v2',
   SHEET_CONFIG: 'tha_bo_sheet_config_v2',
   ACTIVE_TEACHER: 'tha_bo_active_teacher_v2',
 };
@@ -24,7 +25,23 @@ export const storageService = {
         localStorage.setItem(STORAGE_KEYS.SUBMISSIONS, JSON.stringify(INITIAL_SUBMISSIONS));
         return INITIAL_SUBMISSIONS;
       }
-      return JSON.parse(data);
+      const list: Submission[] = JSON.parse(data);
+      let updated = false;
+      // Merge sample records that may be missing
+      INITIAL_SUBMISSIONS.forEach(initSub => {
+        const existing = list.find(s => s.id === initSub.id);
+        if (!existing) {
+          list.push(initSub);
+          updated = true;
+        } else if (!existing.aiEvaluation && initSub.aiEvaluation) {
+          existing.aiEvaluation = initSub.aiEvaluation;
+          updated = true;
+        }
+      });
+      if (updated) {
+        this.saveSubmissions(list);
+      }
+      return list;
     } catch {
       return INITIAL_SUBMISSIONS;
     }
@@ -66,7 +83,8 @@ export const storageService = {
     score: number, 
     feedback: string, 
     teacherName: string, 
-    config?: GoogleSheetConfig
+    config?: GoogleSheetConfig,
+    aiEvaluation?: Submission['aiEvaluation']
   ): Promise<{ success: boolean; message: string }> {
     const list = this.getSubmissions();
     const index = list.findIndex(s => s.id === id);
@@ -80,6 +98,7 @@ export const storageService = {
       feedback,
       gradedAt,
       gradedBy: teacherName,
+      ...(aiEvaluation ? { aiEvaluation } : {}),
     };
     this.saveSubmissions(list);
 
@@ -105,6 +124,22 @@ export const storageService = {
     return { success: true, message: 'บันทึกคะแนนและคำแนะนำเรียบร้อยแล้ว' };
   },
 
+  async saveAiEvaluation(
+    id: string,
+    aiEvaluation: NonNullable<Submission['aiEvaluation']>
+  ): Promise<{ success: boolean; message: string }> {
+    const list = this.getSubmissions();
+    const index = list.findIndex(s => s.id === id);
+    if (index === -1) return { success: false, message: 'ไม่พบข้อมูลการส่งงาน' };
+
+    list[index] = {
+      ...list[index],
+      aiEvaluation,
+    };
+    this.saveSubmissions(list);
+    return { success: true, message: 'บันทึกผลการประเมินจาก AI สำเร็จ' };
+  },
+
   async deleteSubmission(id: string, config?: GoogleSheetConfig): Promise<{ success: boolean; message: string }> {
     const list = this.getSubmissions();
     const updated = list.filter(s => s.id !== id);
@@ -126,6 +161,121 @@ export const storageService = {
     return { success: true, message: 'ลบข้อมูลการส่งงานเรียบร้อยแล้ว' };
   },
 
+  async deleteMultipleSubmissions(
+    ids: string[], 
+    config?: GoogleSheetConfig
+  ): Promise<{ success: boolean; count: number; message: string }> {
+    if (!ids || ids.length === 0) {
+      return { success: true, count: 0, message: 'ไม่มีรายการที่ต้องลบ' };
+    }
+    const idSet = new Set(ids);
+    const list = this.getSubmissions();
+    const updated = list.filter(s => !idSet.has(s.id));
+    const deletedCount = list.length - updated.length;
+    this.saveSubmissions(updated);
+
+    if (config?.scriptUrl) {
+      try {
+        await fetch(config.scriptUrl, {
+          method: 'POST',
+          mode: 'no-cors',
+          headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+          body: JSON.stringify({ 
+            action: 'deleteMultipleSubmissions', 
+            ids: Array.from(idSet) 
+          }),
+        });
+      } catch (err) {
+        console.warn('Delete multiple submissions sync err:', err);
+      }
+    }
+
+    return { 
+      success: true, 
+      count: deletedCount, 
+      message: `ลบข้อมูลนักเรียนเรียบร้อยแล้ว (${deletedCount} รายการ)` 
+    };
+  },
+
+  async deleteSubmissionsByFilter(
+    filter: {
+      academicYear?: string;
+      semester?: string;
+      gradeLevel?: GradeLevel | string;
+      room?: string;
+      teacherName?: string;
+    },
+    config?: GoogleSheetConfig
+  ): Promise<{ success: boolean; count: number; message: string }> {
+    const list = this.getSubmissions();
+    const targets = list.filter(s => {
+      if (filter.teacherName && s.teacherName !== filter.teacherName && !s.teacherName.includes(filter.teacherName)) {
+        return false;
+      }
+      if (filter.academicYear && filter.academicYear !== 'ALL' && (s.academicYear || '2567') !== filter.academicYear) {
+        return false;
+      }
+      if (filter.semester && filter.semester !== 'ALL' && (s.semester || '1') !== filter.semester) {
+        return false;
+      }
+      if (filter.gradeLevel && filter.gradeLevel !== 'ALL' && s.gradeLevel !== filter.gradeLevel) {
+        return false;
+      }
+      if (filter.room && filter.room !== 'ALL' && s.room !== filter.room) {
+        return false;
+      }
+      return true;
+    });
+
+    const targetIds = targets.map(t => t.id);
+    return this.deleteMultipleSubmissions(targetIds, config);
+  },
+
+  async updateSubmissionStudent(
+    id: string,
+    data: {
+      studentName: string;
+      studentNumber: string;
+      gradeLevel?: GradeLevel;
+      room?: string;
+      workUrl?: string;
+    },
+    config?: GoogleSheetConfig
+  ): Promise<{ success: boolean; message: string }> {
+    const list = this.getSubmissions();
+    const index = list.findIndex(s => s.id === id);
+    if (index === -1) return { success: false, message: 'ไม่พบข้อมูลการส่งงานที่ต้องการแก้ไข' };
+
+    list[index] = {
+      ...list[index],
+      studentName: data.studentName.trim(),
+      studentNumber: data.studentNumber.trim(),
+      ...(data.gradeLevel ? { gradeLevel: data.gradeLevel } : {}),
+      ...(data.room ? { room: data.room } : {}),
+      ...(data.workUrl ? { workUrl: data.workUrl.trim() } : {}),
+    };
+    this.saveSubmissions(list);
+
+    if (config?.scriptUrl) {
+      try {
+        await fetch(config.scriptUrl, {
+          method: 'POST',
+          mode: 'no-cors',
+          headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+          body: JSON.stringify({
+            action: 'updateSubmissionStudent',
+            id,
+            ...data,
+          }),
+        });
+      } catch (err) {
+        console.warn('Update submission sync err:', err);
+      }
+    }
+
+    return { success: true, message: 'ปรับปรุงข้อมูลนักเรียนเรียบร้อยแล้ว' };
+  },
+
   // --- TEACHERS ---
   getTeachers(): Teacher[] {
     try {
@@ -134,7 +284,14 @@ export const storageService = {
         localStorage.setItem(STORAGE_KEYS.TEACHERS, JSON.stringify(INITIAL_TEACHERS));
         return INITIAL_TEACHERS;
       }
-      return JSON.parse(data);
+      const parsed: Teacher[] = JSON.parse(data);
+      // Remove default test account 'teacher' if present in localStorage
+      const cleaned = parsed.filter(t => t.username.toLowerCase() !== 'teacher');
+      if (cleaned.length !== parsed.length) {
+        this.saveTeachers(cleaned);
+        return cleaned;
+      }
+      return parsed;
     } catch {
       return INITIAL_TEACHERS;
     }
@@ -190,6 +347,99 @@ export const storageService = {
     }
 
     return { success: true, message: 'ลบข้อมูลครูผู้สอนเรียบร้อยแล้ว' };
+  },
+
+  async requestTeacherPasswordReset(teacherIdentifier: string): Promise<{ success: boolean; message: string; teacherName?: string }> {
+    const list = this.getTeachers();
+    const query = teacherIdentifier.trim().toLowerCase();
+    const teacher = list.find(t => 
+      t.id.toLowerCase() === query || 
+      t.username.toLowerCase() === query || 
+      t.fullName.toLowerCase().includes(query)
+    );
+
+    if (!teacher) {
+      return { 
+        success: false, 
+        message: 'ไม่พบข้อมูลครูผู้สอนจากชื่อหรือ Username ที่ระบุ กรุณาตรวจสอบหรือติดต่อผู้ดูแลระบบโดยตรง' 
+      };
+    }
+
+    teacher.resetRequested = true;
+    teacher.resetRequestedAt = new Date().toLocaleString('th-TH');
+    this.saveTeachers(list);
+
+    return { 
+      success: true, 
+      message: `ระบบได้ส่งคำขอรีเซ็ตรหัสผ่านของ "${teacher.fullName}" ไปยังผู้ดูแลระบบ (Admin) เรียบร้อยแล้ว`,
+      teacherName: teacher.fullName 
+    };
+  },
+
+  async resetTeacherCredentials(
+    teacherId: string, 
+    newUsername: string, 
+    newPassword: string, 
+    config?: GoogleSheetConfig
+  ): Promise<{ success: boolean; message: string }> {
+    const list = this.getTeachers();
+    const teacherIndex = list.findIndex(t => t.id === teacherId);
+    
+    if (teacherIndex === -1) {
+      return { success: false, message: 'ไม่พบข้อมูลครูผู้สอนที่ต้องการรีเซ็ต' };
+    }
+
+    const trimmedUser = newUsername.trim();
+    const trimmedPass = newPassword.trim();
+
+    if (!trimmedUser || !trimmedPass) {
+      return { success: false, message: 'กรุณาระบุ Username และ Password ให้ครบถ้วน' };
+    }
+
+    // Check if newUsername is already taken by another teacher
+    const conflict = list.find(t => t.id !== teacherId && t.username.toLowerCase() === trimmedUser.toLowerCase());
+    if (conflict) {
+      return { success: false, message: `Username "${trimmedUser}" ถูกใช้งานโดยคุณครูท่านอื่นแล้ว` };
+    }
+
+    const oldUsername = list[teacherIndex].username;
+    list[teacherIndex].username = trimmedUser;
+    list[teacherIndex].password = trimmedPass;
+    list[teacherIndex].resetRequested = false;
+    list[teacherIndex].resetRequestedAt = undefined;
+    this.saveTeachers(list);
+
+    // If active teacher is this teacher, update session too
+    const activeTeacher = this.getActiveTeacher();
+    if (activeTeacher && activeTeacher.id === teacherId) {
+      this.setActiveTeacher(list[teacherIndex]);
+    }
+
+    // Sync to Google Sheet if configured
+    if (config?.scriptUrl) {
+      try {
+        await fetch(config.scriptUrl, {
+          method: 'POST',
+          mode: 'no-cors',
+          headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+          body: JSON.stringify({
+            action: 'resetTeacherCredentials',
+            id: teacherId,
+            fullName: list[teacherIndex].fullName,
+            oldUsername,
+            newUsername: trimmedUser,
+            newPassword: trimmedPass,
+          }),
+        });
+      } catch (err) {
+        console.warn('Reset teacher sync err:', err);
+      }
+    }
+
+    return { 
+      success: true, 
+      message: `รีเซ็ตข้อมูลเข้าสู่ระบบของ "${list[teacherIndex].fullName}" สำเร็จ` 
+    };
   },
 
   getActiveTeacher(): Teacher | null {
@@ -251,6 +501,64 @@ export const storageService = {
     return { success: true, message: `บันทึกงานใหม่จำนวน ${assignments.length} ชิ้นงานเรียบร้อยแล้ว` };
   },
 
+  async updateAssignment(
+    updatedAssignment: Assignment, 
+    config?: GoogleSheetConfig
+  ): Promise<{ success: boolean; message: string }> {
+    const currentAssignments = this.getAssignments();
+    const index = currentAssignments.findIndex(a => a.id === updatedAssignment.id);
+    if (index === -1) {
+      return { success: false, message: 'ไม่พบข้อมูลงานที่ต้องการแก้ไข' };
+    }
+    
+    currentAssignments[index] = { ...currentAssignments[index], ...updatedAssignment };
+    this.saveAssignments(currentAssignments);
+
+    // ปรับปรุงข้อมูลในงานที่นักเรียนส่งไปแล้วให้เป็นปัจจุบันตามข้อมูลใหม่
+    const currentSubmissions = this.getSubmissions();
+    let hasSubmissionsUpdated = false;
+    const updatedSubmissions = currentSubmissions.map(sub => {
+      if (sub.assignmentId === updatedAssignment.id) {
+        hasSubmissionsUpdated = true;
+        return {
+          ...sub,
+          subjectCode: updatedAssignment.subjectCode,
+          subjectName: updatedAssignment.subjectName,
+          assignmentName: updatedAssignment.title,
+          maxScore: updatedAssignment.maxScore,
+          workType: updatedAssignment.workType || sub.workType,
+          sampleUrl: updatedAssignment.sampleUrl ?? sub.sampleUrl,
+          academicYear: updatedAssignment.academicYear || sub.academicYear,
+          semester: updatedAssignment.semester || sub.semester,
+        };
+      }
+      return sub;
+    });
+
+    if (hasSubmissionsUpdated) {
+      this.saveSubmissions(updatedSubmissions);
+    }
+
+    // Sync to Google Sheet Web App in background
+    if (config?.scriptUrl) {
+      try {
+        await fetch(config.scriptUrl, {
+          method: 'POST',
+          mode: 'no-cors',
+          headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+          body: JSON.stringify({
+            action: 'updateAssignment',
+            assignment: updatedAssignment,
+          }),
+        });
+      } catch (err) {
+        console.warn('Update assignment sync err:', err);
+      }
+    }
+
+    return { success: true, message: 'ปรับปรุงข้อมูลวิชาและใบงานเรียบร้อยแล้ว' };
+  },
+
   async deleteAssignment(id: string, config?: GoogleSheetConfig): Promise<void> {
     const current = this.getAssignments().filter(a => a.id !== id);
     this.saveAssignments(current);
@@ -267,6 +575,146 @@ export const storageService = {
         console.warn('Delete assignment sync err:', err);
       }
     }
+  },
+
+  // --- SUBJECTS (รายวิชา) ---
+  getSubjects(): Subject[] {
+    try {
+      const data = localStorage.getItem(STORAGE_KEYS.SUBJECTS);
+      if (!data) {
+        // Also extract unique subjects from existing assignments if any
+        const assignments = this.getAssignments();
+        const extracted = new Map<string, Subject>();
+        INITIAL_SUBJECTS.forEach(s => extracted.set(s.code, s));
+        assignments.forEach(a => {
+          if (!extracted.has(a.subjectCode)) {
+            extracted.set(a.subjectCode, {
+              id: `SUBJ-${a.subjectCode}-${Date.now()}`,
+              code: a.subjectCode,
+              name: a.subjectName,
+              teacherName: a.teacherName,
+              academicYear: a.academicYear,
+              semester: a.semester,
+            });
+          }
+        });
+        const list = Array.from(extracted.values());
+        localStorage.setItem(STORAGE_KEYS.SUBJECTS, JSON.stringify(list));
+        return list;
+      }
+      return JSON.parse(data);
+    } catch {
+      return INITIAL_SUBJECTS;
+    }
+  },
+
+  saveSubjects(subjects: Subject[]) {
+    localStorage.setItem(STORAGE_KEYS.SUBJECTS, JSON.stringify(subjects));
+  },
+
+  async addSubject(
+    subject: { code: string; name: string; teacherName?: string; academicYear?: string; semester?: string }, 
+    config?: GoogleSheetConfig
+  ): Promise<{ success: boolean; message: string; subject?: Subject }> {
+    const list = this.getSubjects();
+    const cleanCode = subject.code.trim();
+    const cleanName = subject.name.trim();
+
+    if (!cleanCode || !cleanName) {
+      return { success: false, message: 'กรุณาระบุรหัสวิชาและชื่อวิชาให้ครบถ้วน' };
+    }
+
+    const exists = list.find(s => s.code.toLowerCase() === cleanCode.toLowerCase());
+    if (exists) {
+      return { success: false, message: `รหัสวิชา "${cleanCode}" มีอยู่ในระบบแล้ว (${exists.name})` };
+    }
+
+    const newSubject: Subject = {
+      id: `SUBJ-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+      code: cleanCode,
+      name: cleanName,
+      teacherName: subject.teacherName,
+      academicYear: subject.academicYear || '2567',
+      semester: subject.semester || '1',
+      createdAt: new Date().toLocaleString('th-TH'),
+    };
+
+    list.unshift(newSubject);
+    this.saveSubjects(list);
+
+    return { 
+      success: true, 
+      message: `เพิ่มรายวิชา "${cleanCode} ${cleanName}" เรียบร้อยแล้ว ✨`, 
+      subject: newSubject 
+    };
+  },
+
+  async updateSubject(
+    oldCode: string, 
+    updated: { code: string; name: string }, 
+    config?: GoogleSheetConfig
+  ): Promise<{ success: boolean; message: string }> {
+    const list = this.getSubjects();
+    const index = list.findIndex(s => s.code.toLowerCase() === oldCode.toLowerCase());
+    if (index === -1) {
+      return { success: false, message: 'ไม่พบวิชาที่ต้องการแก้ไข' };
+    }
+
+    const newCode = updated.code.trim();
+    const newName = updated.name.trim();
+
+    if (!newCode || !newName) {
+      return { success: false, message: 'รหัสวิชาและชื่อวิชาต้องไม่เว้นว่าง' };
+    }
+
+    // Check duplicate if code changed
+    if (newCode.toLowerCase() !== oldCode.toLowerCase()) {
+      const duplicate = list.find(s => s.code.toLowerCase() === newCode.toLowerCase());
+      if (duplicate) {
+        return { success: false, message: `รหัสวิชา "${newCode}" มีอยู่ในระบบแล้ว` };
+      }
+    }
+
+    list[index] = { ...list[index], code: newCode, name: newName };
+    this.saveSubjects(list);
+
+    // Cascade update to all assignments matching oldCode
+    const assignments = this.getAssignments();
+    let assignChanged = false;
+    const updatedAssignments = assignments.map(a => {
+      if (a.subjectCode.toLowerCase() === oldCode.toLowerCase()) {
+        assignChanged = true;
+        return { ...a, subjectCode: newCode, subjectName: newName };
+      }
+      return a;
+    });
+    if (assignChanged) {
+      this.saveAssignments(updatedAssignments);
+    }
+
+    // Cascade update to all submissions matching oldCode
+    const submissions = this.getSubmissions();
+    let subChanged = false;
+    const updatedSubmissions = submissions.map(sub => {
+      if (sub.subjectCode.toLowerCase() === oldCode.toLowerCase()) {
+        subChanged = true;
+        return { ...sub, subjectCode: newCode, subjectName: newName };
+      }
+      return sub;
+    });
+    if (subChanged) {
+      this.saveSubmissions(updatedSubmissions);
+    }
+
+    return { success: true, message: `ปรับปรุงข้อมูลรายวิชา "${newCode} ${newName}" เรียบร้อยแล้ว` };
+  },
+
+  async deleteSubject(code: string, config?: GoogleSheetConfig): Promise<{ success: boolean; message: string }> {
+    const list = this.getSubjects();
+    const filtered = list.filter(s => s.code.toLowerCase() !== code.toLowerCase());
+    this.saveSubjects(filtered);
+
+    return { success: true, message: `ลบรายวิชารหัส "${code}" เรียบร้อยแล้ว` };
   },
 
   // --- SHEET CONFIG ---
@@ -393,12 +841,14 @@ export const storageService = {
       'รหัสวิชา': s.subjectCode,
       'ชื่อวิชา': s.subjectName,
       'ชื่องาน': s.assignmentName,
-      'คะแนนที่ได้': s.score !== null ? s.score : '-',
+      'คะแนนที่ได้ (ครู)': s.score !== null ? s.score : '-',
+      'คะแนน AI ประเมิน': s.aiEvaluation ? `${s.aiEvaluation.suggestedScore}` : '-',
       'คะแนนเต็ม': s.maxScore,
       'สถานะ': s.status,
+      'คำแนะนำจาก AI': s.aiEvaluation?.feedback || '-',
       'ลิงก์ผลงาน': s.workUrl,
       'ครูผู้สอน/ผู้ตรวจ': s.gradedBy || s.teacherName,
-      'คำแนะนำ/ข้อเสนอแนะ': s.feedback || '-',
+      'คำแนะนำของคุณครู': s.feedback || '-',
       'วันที่ตรวจ': s.gradedAt || '-',
     }));
 
@@ -419,9 +869,11 @@ export const storageService = {
       { wch: 10 }, // รหัสวิชา
       { wch: 20 }, // ชื่อวิชา
       { wch: 30 }, // ชื่องาน
-      { wch: 10 }, // คะแนนที่ได้
+      { wch: 12 }, // คะแนนที่ได้
+      { wch: 14 }, // คะแนน AI
       { wch: 10 }, // คะแนนเต็ม
       { wch: 10 }, // สถานะ
+      { wch: 30 }, // คำแนะนำ AI
       { wch: 35 }, // ลิงก์
       { wch: 20 }, // ครู
       { wch: 30 }, // ข้อเสนอแนะ
@@ -449,7 +901,10 @@ export const storageService = {
         <td style="padding: 8px; text-align: center; font-size: 11px;">${s.academicYear ? `${s.academicYear}/${s.semester || '1'}` : '-'}</td>
         <td style="padding: 8px;">${s.subjectCode} ${s.subjectName}</td>
         <td style="padding: 8px;">${s.assignmentName}</td>
-        <td style="padding: 8px; text-align: center; font-weight: bold; font-size: 14px; color: ${s.status === 'ตรวจแล้ว' ? '#059669' : '#d97706'};">
+        <td style="padding: 8px; text-align: center; font-weight: bold; font-size: 13px; color: #7c3aed; background-color: #f5f3ff;">
+          ${s.aiEvaluation ? `${s.aiEvaluation.suggestedScore}/${s.maxScore}` : '-'}
+        </td>
+        <td style="padding: 8px; text-align: center; font-weight: bold; font-size: 13px; color: ${s.status === 'ตรวจแล้ว' ? '#059669' : '#d97706'};">
           ${s.score !== null ? s.score : '-'} / ${s.maxScore}
         </td>
         <td style="padding: 8px; text-align: center;">
@@ -457,7 +912,10 @@ export const storageService = {
             ${s.status}
           </span>
         </td>
-        <td style="padding: 8px; font-size: 12px; color: #4b5563;">${s.feedback || '-'}</td>
+        <td style="padding: 8px; font-size: 12px; color: #4b5563;">
+          ${s.aiEvaluation ? `<div style="font-size: 11px; color: #6d28d9; margin-bottom: 3px;"><strong>🤖 AI:</strong> ${s.aiEvaluation.feedback}</div>` : ''}
+          ${s.feedback ? `<div><strong>ครู:</strong> ${s.feedback}</div>` : (s.aiEvaluation ? '' : '-')}
+        </td>
       </tr>
     `).join('');
 
@@ -512,13 +970,14 @@ export const storageService = {
             <tr>
               <th class="center" style="width: 35px;">ลำดับ</th>
               <th class="center" style="width: 40px;">เลขที่</th>
-              <th style="width: 150px;">ชื่อ-สกุล</th>
+              <th style="width: 140px;">ชื่อ-สกุล</th>
               <th class="center" style="width: 55px;">ชั้น/ห้อง</th>
-              <th class="center" style="width: 60px;">ปี/เทอม</th>
-              <th style="width: 120px;">วิชา</th>
-              <th style="width: 170px;">ชื่องาน</th>
-              <th class="center" style="width: 85px;">คะแนน</th>
-              <th class="center" style="width: 75px;">สถานะ</th>
+              <th class="center" style="width: 55px;">ปี/เทอม</th>
+              <th style="width: 110px;">วิชา</th>
+              <th style="width: 150px;">ชื่องาน</th>
+              <th class="center" style="width: 80px; background-color: #6d28d9;">🤖 คะแนน AI</th>
+              <th class="center" style="width: 80px;">คะแนนครู</th>
+              <th class="center" style="width: 70px;">สถานะ</th>
               <th>คำแนะนำ/ข้อเสนอแนะ</th>
             </tr>
           </thead>

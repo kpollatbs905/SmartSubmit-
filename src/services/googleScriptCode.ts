@@ -82,7 +82,7 @@ function initSheets() {
       'T001',
       'ครูชมัยพร ถิ่นสำราญ',
       'กลุ่มสาระการเรียนรู้วิทยาศาสตร์และเทคโนโลยี',
-      'teacher',
+      'chamaiporn',
       '1234',
       new Date().toLocaleString('th-TH')
     ]);
@@ -92,7 +92,7 @@ function initSheets() {
   let assignSheet = ss.getSheetByName(SHEET_NAMES.ASSIGNMENTS);
   if (!assignSheet) {
     assignSheet = ss.insertSheet(SHEET_NAMES.ASSIGNMENTS);
-    const headers = ['ID', 'ครูผู้สอน', 'รหัสวิชา', 'ชื่อวิชา', 'ชื่องาน', 'คะแนนเต็ม', 'วันที่สร้าง'];
+    const headers = ['ID', 'ครูผู้สอน', 'รหัสวิชา', 'ชื่อวิชา', 'ชื่องาน', 'คะแนนเต็ม', 'ชนิดของงาน', 'ตัวอย่างใบงาน', 'วันที่สร้าง'];
     assignSheet.getRange(1, 1, 1, headers.length).setValues([headers]);
     assignSheet.getRange(1, 1, 1, headers.length)
       .setBackground('#D97706')
@@ -104,11 +104,13 @@ function initSheets() {
     // ใส่ตัวอย่างงานเริ่มต้น
     assignSheet.appendRow([
       'A001',
-      'ครูชมัยพร ถิ่นสำราญ',
+      'ครูชมัยพร ถินสำราญ',
       'ว21103',
       'วิทยาการคำนวณ 1',
       'ใบงานที่ 1: การเขียนผังงาน Flowchart',
       10,
+      'ผังงาน/อัลกอริทึม/Coding',
+      'https://docs.google.com/presentation/d/sample',
       new Date().toLocaleString('th-TH')
     ]);
   }
@@ -239,6 +241,8 @@ function doPost(e) {
           a.subjectName,
           a.title,
           a.maxScore,
+          a.workType || 'ใบงาน/แบบฝึกหัด',
+          a.sampleUrl || '',
           new Date().toLocaleString('th-TH')
         ]);
       });
@@ -257,6 +261,30 @@ function doPost(e) {
         }
       }
       return responseJSON({ status: 'success', message: 'ลบงานสำเร็จ' });
+    }
+
+    // 5.1 แก้ไขข้อมูลงานและชื่อวิชา (ครูผู้สอน)
+    if (action === 'updateAssignment') {
+      const sheet = ss.getSheetByName(SHEET_NAMES.ASSIGNMENTS);
+      const rows = sheet.getDataRange().getValues();
+      const a = body.assignment;
+      let found = false;
+      for (let i = 1; i < rows.length; i++) {
+        if (String(rows[i][0]) === String(a.id)) {
+          sheet.getRange(i + 1, 3).setValue(a.subjectCode);
+          sheet.getRange(i + 1, 4).setValue(a.subjectName);
+          sheet.getRange(i + 1, 5).setValue(a.title);
+          sheet.getRange(i + 1, 6).setValue(a.maxScore);
+          sheet.getRange(i + 1, 7).setValue(a.workType || 'ใบงาน/แบบฝึกหัด');
+          sheet.getRange(i + 1, 8).setValue(a.sampleUrl || '');
+          found = true;
+          break;
+        }
+      }
+      return responseJSON({ 
+        status: found ? 'success' : 'not_found', 
+        message: found ? 'แก้ไขข้อมูลงานและวิชาสำเร็จ' : 'ไม่พบงานที่ต้องการแก้ไข' 
+      });
     }
 
     // 6. ลบข้อมูลการส่งงานของนักเรียน (Admin)
@@ -285,6 +313,25 @@ function doPost(e) {
         }
       }
       return responseJSON({ status: 'success', message: 'ลบข้อมูลครูสำเร็จ' });
+    }
+
+    // 8. รีเซ็ต Username และ Password ครูผู้สอน (Admin)
+    if (action === 'resetTeacherCredentials') {
+      const sheet = ss.getSheetByName(SHEET_NAMES.TEACHERS);
+      const rows = sheet.getDataRange().getValues();
+      let updated = false;
+      for (let i = 1; i < rows.length; i++) {
+        if (String(rows[i][0]) === String(body.id) || rows[i][1] === body.fullName || rows[i][3] === body.oldUsername) {
+          if (body.newUsername) sheet.getRange(i + 1, 4).setValue(body.newUsername);
+          if (body.newPassword) sheet.getRange(i + 1, 5).setValue(body.newPassword);
+          updated = true;
+          break;
+        }
+      }
+      return responseJSON({ 
+        status: updated ? 'success' : 'not_found', 
+        message: updated ? 'รีเซ็ตข้อมูลครูสำเร็จ' : 'ไม่พบข้อมูลครู' 
+      });
     }
 
     return responseJSON({ status: 'error', message: 'Action ไม่ถูกต้อง' });

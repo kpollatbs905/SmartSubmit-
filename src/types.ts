@@ -20,6 +20,8 @@ export interface Submission {
   assignmentId: string;     // ID ของงาน
   assignmentName: string;   // ชื่องานที่ส่ง
   maxScore: number;         // คะแนนเต็ม
+  workType?: string;        // ชนิดของงาน เช่น ใบงาน, Canva, วิดีโอ, ผังงาน
+  sampleUrl?: string;       // ลิงก์ตัวอย่างใบงาน/เกณฑ์จากครูผู้สอน
   academicYear?: string;    // ปีการศึกษา เช่น 2567
   semester?: string;        // ภาคเรียน เช่น 1 หรือ 2
   workUrl: string;          // แนบลิงก์งาน
@@ -28,6 +30,13 @@ export interface Submission {
   feedback?: string;        // ข้อเสนอแนะจากคุณครู
   gradedAt?: string;        // วันที่ตรวจ
   gradedBy?: string;        // ตรวจโดย
+  aiEvaluation?: {          // ผลการประเมินจาก AI
+    suggestedScore: number;
+    feedback: string;
+    strengths?: string[];
+    improvements?: string[];
+    evaluatedAt?: string;
+  };
 }
 
 export interface Teacher {
@@ -37,12 +46,27 @@ export interface Teacher {
   username: string;
   password: string;
   createdAt: string;
+  resetRequested?: boolean;   // มีคำขอรีเซ็ตรหัสผ่าน
+  resetRequestedAt?: string; // วันที่ส่งคำขอรีเซ็ต
 }
 
 export interface AssignmentItem {
   id: string;
   title: string;
   maxScore: number;
+  workType?: string;        // ชนิดของงาน
+  sampleUrl?: string;       // ช่องส่งตัวอย่างใบงาน/ลิงก์ตัวอย่าง
+  rubricCriteria?: string;  // เกณฑ์การให้คะแนน
+}
+
+export interface Subject {
+  id: string;
+  code: string;           // รหัสวิชา เช่น ว21103
+  name: string;           // ชื่อวิชา เช่น วิทยาการคำนวณ 1
+  teacherName?: string;   // ครูผู้สอน
+  academicYear?: string;  // ปีการศึกษา
+  semester?: string;      // ภาคเรียน
+  createdAt?: string;
 }
 
 export interface Assignment {
@@ -52,6 +76,9 @@ export interface Assignment {
   subjectName: string;
   title: string;
   maxScore: number;
+  workType?: string;        // ชนิดของงาน
+  sampleUrl?: string;       // ช่องส่งตัวอย่างใบงาน/ลิงก์ตัวอย่าง
+  rubricCriteria?: string;  // เกณฑ์การประเมิน
   academicYear?: string;    // ปีการศึกษา เช่น 2567
   semester?: string;        // ภาคเรียน เช่น 1 หรือ 2
   description?: string;

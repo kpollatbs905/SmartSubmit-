@@ -17,8 +17,11 @@ import {
   MessageSquare,
   BookOpen,
   Calendar,
-  Layers
+  Layers,
+  Trash2,
+  AlertTriangle
 } from 'lucide-react';
+import Swal from 'sweetalert2';
 import { Submission, GradeLevel, GoogleSheetConfig } from '../types';
 import { GRADE_LEVELS, ROOMS } from '../constants';
 import { storageService } from '../services/storageService';
@@ -102,6 +105,53 @@ export default function SubmissionStatusView({
     }
   };
 
+  // Check if an item is a duplicate submission (same assignment submitted more than once)
+  const isDuplicateItem = (item: Submission) => {
+    return filteredSubmissions.filter(s => 
+      s.assignmentId === item.assignmentId || 
+      s.assignmentName === item.assignmentName
+    ).length > 1;
+  };
+
+  const handleDeleteDuplicateSubmission = async (item: Submission) => {
+    const isDup = isDuplicateItem(item);
+    const result = await Swal.fire({
+      title: isDup ? '🗑️ ลบงานที่ส่งซ้ำ?' : '🗑️ ยืนยันการลบผลงานนี้?',
+      html: `
+        <div class="text-left text-xs space-y-2">
+          <p class="font-bold text-gray-800">ผลงาน: ${item.assignmentName}</p>
+          <p class="text-gray-500">วิชา: ${item.subjectCode} ${item.subjectName}</p>
+          <p class="text-gray-500">ส่งไว้เมื่อ: <b>${item.submittedAt}</b></p>
+          <p class="text-rose-700 bg-rose-50 p-2.5 rounded-xl border border-rose-200">
+            ⚠️ คุณต้องการลบรายการนี้ใช่หรือไม่? ${isDup ? '(เหมาะสำหรับลบงานที่ส่งซ้ำออกให้เหลือชิ้นเดียว)' : '(ข้อมูลจะถูกนำออกจากระบบ)'}
+          </p>
+        </div>
+      `,
+      icon: 'warning',
+      showCancelButton: true,
+      confirmButtonText: '🗑️ ยืนยันการลบ',
+      cancelButtonText: 'ยกเลิก',
+      confirmButtonColor: '#EF4444',
+      cancelButtonColor: '#6B7280',
+      customClass: {
+        popup: 'rounded-3xl font-[\'Kanit\',sans-serif]',
+        confirmButton: 'px-4 py-2 rounded-xl text-xs font-bold',
+        cancelButton: 'px-4 py-2 rounded-xl text-xs font-bold',
+      }
+    });
+
+    if (result.isConfirmed) {
+      alertService.loading('กำลังลบงาน...', 'ระบบกำลังลบข้อมูลการส่งงานออกจากระบบ');
+      await storageService.deleteSubmission(item.id, sheetConfig);
+      await onRefreshData();
+      alertService.close();
+      if (viewingDetail?.id === item.id) {
+        setViewingDetail(null);
+      }
+      alertService.success('ลบข้อมูลเรียบร้อยแล้ว', `ลบผลงาน "${item.assignmentName}" เรียบร้อยแล้ว`);
+    }
+  };
+
   const handleExportExcel = () => {
     if (!hasSearched) {
       alertService.info('กรุณาระบุชื่อนักเรียนก่อน', 'โปรดพิมพ์ชื่อนักเรียนในช่องค้นหาก่อนทำการส่งออกข้อมูล');
@@ -132,20 +182,24 @@ export default function SubmissionStatusView({
       {/* Top Banner & Stats */}
       <div className="bg-gradient-to-r from-white/95 via-purple-50/60 to-pink-50/60 backdrop-blur-md rounded-3xl p-6 md:p-8 shadow-xl shadow-purple-100/40 border border-purple-100/80">
         <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-6">
-          <div>
-            <div className="inline-flex items-center gap-2 px-3 py-1 bg-emerald-100/80 border border-emerald-200 text-emerald-800 rounded-full text-xs font-semibold mb-2">
-              <span className="w-2 h-2 rounded-full bg-emerald-500 animate-ping" />
-              <span>⚡ ระบบค้นหาแบบ Real-time ค้นหาได้ทันทีขณะพิมพ์ 🎯</span>
+          <div className="flex items-start gap-4">
+            <img 
+              src="https://img1.pic.in.th/images/images-39bd26cc1ba9520da.png" 
+              alt="โลโก้โรงเรียนท่าบ่อ" 
+              className="w-14 h-14 md:w-16 md:h-16 object-contain rounded-2xl drop-shadow-md shrink-0 bg-white p-1 border border-amber-200"
+            />
+            <div>
+              <div className="inline-flex items-center gap-2 px-3 py-1 bg-amber-100 border border-amber-200 text-amber-950 rounded-full text-xs font-bold mb-1">
+                <span className="text-sm font-black">🏫 โรงเรียนท่าบ่อ สพม.หนองคาย</span>
+              </div>
+              <h1 className="text-2xl md:text-3xl font-extrabold text-gray-900 tracking-tight flex items-center gap-2">
+                <span>📊 ตรวจสอบสถานะการส่งงานและคะแนน</span>
+                <span>✨</span>
+              </h1>
+              <p className="text-xs md:text-sm text-gray-500 mt-1 flex items-center gap-1.5">
+                <span>ตรวจสอบคะแนนและสถานะผลงานของตนเองได้แบบเรียลไทม์ 🌸</span>
+              </p>
             </div>
-            <h1 className="text-2xl md:text-3xl font-bold text-gray-900 tracking-tight flex items-center gap-2">
-              <span>📊 ตรวจสอบสถานะการส่งงานและคะแนน</span>
-              <span>✨</span>
-            </h1>
-            <p className="text-sm text-gray-500 mt-1 flex items-center gap-1.5">
-              <span>🏫 โรงเรียนท่าบ่อ</span>
-              <span>•</span>
-              <span>ตรวจสอบคะแนนและสถานะผลงานของตนเองได้แบบเรียลไทม์ 🌸</span>
-            </p>
           </div>
 
           {/* Quick Actions */}
@@ -441,8 +495,15 @@ export default function SubmissionStatusView({
                           </span>
                         )}
                       </div>
-                      <div className="text-xs text-gray-800 font-medium truncate mt-0.5" title={item.assignmentName}>
-                        {item.assignmentName}
+                      <div className="flex flex-wrap items-center gap-1.5 mt-0.5">
+                        <span className="text-xs text-gray-800 font-medium truncate" title={item.assignmentName}>
+                          {item.assignmentName}
+                        </span>
+                        {item.workType && (
+                          <span className="px-2 py-0.5 rounded-md bg-purple-100/70 text-purple-900 text-[10px] font-semibold">
+                            🏷️ {item.workType}
+                          </span>
+                        )}
                       </div>
                       <div className="text-[11px] text-gray-400 mt-0.5">
                         ครูผู้สอน: {item.teacherName}
@@ -502,14 +563,29 @@ export default function SubmissionStatusView({
                       </a>
                     </td>
 
-                    {/* ปุ่มดูรายละเอียด */}
+                    {/* ปุ่มดูรายละเอียดและลบงานซ้ำ */}
                     <td className="py-4 px-4 text-center">
-                      <button
-                        onClick={() => setViewingDetail(item)}
-                        className="px-3 py-1.5 rounded-xl text-xs font-medium text-violet-700 hover:bg-violet-100/70 border border-purple-200 transition-colors cursor-pointer"
-                      >
-                        👁️ ดูข้อมูล
-                      </button>
+                      <div className="flex items-center justify-center gap-1.5">
+                        <button
+                          onClick={() => setViewingDetail(item)}
+                          className="px-2.5 py-1.5 rounded-xl text-xs font-semibold text-violet-700 hover:bg-violet-100/70 border border-purple-200 transition-colors cursor-pointer"
+                          title="ดูรายละเอียดการส่งงานและคะแนน"
+                        >
+                          👁️ ดูข้อมูล
+                        </button>
+                        <button
+                          onClick={() => handleDeleteDuplicateSubmission(item)}
+                          className={`px-2.5 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center gap-1 ${
+                            isDuplicateItem(item)
+                              ? 'bg-rose-100 hover:bg-rose-200 text-rose-700 border border-rose-300 shadow-2xs'
+                              : 'text-gray-400 hover:text-rose-600 hover:bg-rose-50 border border-transparent hover:border-rose-200'
+                          }`}
+                          title={isDuplicateItem(item) ? "⚠️ ตรวจพบงานซ้ำ: คลิกเพื่อลบงานที่ส่งซ้ำชิ้นนี้" : "ลบผลงานนี้"}
+                        >
+                          <Trash2 size={13} />
+                          {isDuplicateItem(item) && <span>ลบงานซ้ำ</span>}
+                        </button>
+                      </div>
                     </td>
                   </tr>
                 ))}
@@ -578,6 +654,28 @@ export default function SubmissionStatusView({
                 <span className="text-gray-400">ชื่องาน:</span>
                 <span className="font-semibold text-gray-800 text-right">{viewingDetail.assignmentName}</span>
               </div>
+              {viewingDetail.workType && (
+                <div className="flex justify-between py-1.5 border-b border-gray-100">
+                  <span className="text-gray-400">ชนิดของงาน:</span>
+                  <span className="font-semibold text-purple-900 bg-purple-50 px-2 py-0.5 rounded-md border border-purple-200">
+                    🏷️ {viewingDetail.workType}
+                  </span>
+                </div>
+              )}
+              {viewingDetail.sampleUrl && (
+                <div className="flex justify-between py-1.5 border-b border-gray-100">
+                  <span className="text-gray-400">ตัวอย่างใบงานครู:</span>
+                  <a
+                    href={viewingDetail.sampleUrl.startsWith('http') ? viewingDetail.sampleUrl : `https://${viewingDetail.sampleUrl}`}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="font-bold text-violet-700 hover:underline flex items-center gap-1"
+                  >
+                    <span>คลิกดูตัวอย่าง</span>
+                    <ExternalLink size={12} />
+                  </a>
+                </div>
+              )}
               <div className="flex justify-between py-1.5 border-b border-gray-100">
                 <span className="text-gray-400">ครูผู้สอน:</span>
                 <span className="font-semibold text-gray-800">{viewingDetail.teacherName}</span>
@@ -604,16 +702,25 @@ export default function SubmissionStatusView({
               </div>
             </div>
 
-            {/* Link button */}
-            <div className="pt-2 flex gap-3">
+            {/* Action buttons */}
+            <div className="pt-2 flex flex-col sm:flex-row gap-2.5">
               <a
                 href={viewingDetail.workUrl.startsWith('http') ? viewingDetail.workUrl : `https://${viewingDetail.workUrl}`}
                 target="_blank"
                 rel="noreferrer"
-                className="flex-1 py-3 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold flex items-center justify-center gap-2 shadow-md cursor-pointer"
+                className="flex-1 py-3 bg-gradient-to-r from-violet-600 to-indigo-600 hover:from-violet-700 hover:to-indigo-700 text-white rounded-xl text-xs font-bold flex items-center justify-center gap-2 shadow-md cursor-pointer"
               >
                 <ExternalLink size={14} /> เปิดดูไฟล์งานที่ส่ง
               </a>
+              <button
+                type="button"
+                onClick={() => handleDeleteDuplicateSubmission(viewingDetail)}
+                className="px-4 py-3 bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 rounded-xl text-xs font-bold cursor-pointer transition-colors flex items-center justify-center gap-1.5"
+                title="ลบงานชิ้นนี้ออกจากระบบ (เหมาะสำหรับงานที่ส่งซ้ำ)"
+              >
+                <Trash2 size={13} />
+                <span>🗑️ ลบงานนี้ (กรณีส่งซ้ำ)</span>
+              </button>
               <button
                 onClick={() => setViewingDetail(null)}
                 className="px-5 py-3 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-xl text-xs font-bold cursor-pointer"

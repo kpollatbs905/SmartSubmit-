@@ -18,8 +18,11 @@ import {
   Link as LinkIcon, 
   CheckCircle2, 
   HelpCircle,
-  Sparkles
+  Sparkles,
+  Trash2,
+  AlertTriangle
 } from 'lucide-react';
+import Swal from 'sweetalert2';
 import { Submission, GradeLevel, Teacher, Assignment, GoogleSheetConfig } from '../types';
 import { GRADE_LEVELS, ROOMS } from '../constants';
 import { alertService } from '../services/alertService';
@@ -90,6 +93,53 @@ export default function StudentSubmissionView({
 
   const currentAssignment = assignments.find(a => a.id === selectedAssignmentId);
 
+  // Check if current student has already submitted this assignment
+  const existingSubmissions = React.useMemo(() => {
+    if (!studentName.trim() || !selectedAssignmentId) return [];
+    const allSubs = storageService.getSubmissions();
+    const cleanName = studentName.trim().toLowerCase();
+    return allSubs.filter(s =>
+      s.assignmentId === selectedAssignmentId &&
+      s.studentName.toLowerCase().includes(cleanName) &&
+      s.gradeLevel === gradeLevel &&
+      s.room === room
+    );
+  }, [studentName, selectedAssignmentId, gradeLevel, room]);
+
+  const handleDeleteSpecificOldSubmission = async (oldSub: Submission) => {
+    const confirm = await Swal.fire({
+      title: '🗑️ ยืนยันการลบผลงานเดิม?',
+      html: `
+        <div class="text-left text-xs space-y-2">
+          <p>คุณต้องการลบงาน: <b>${oldSub.assignmentName}</b></p>
+          <p class="text-gray-500">ส่งไว้เมื่อ: ${oldSub.submittedAt}</p>
+          <p class="text-rose-600 font-semibold bg-rose-50 p-2 rounded-lg border border-rose-200">
+            ⚠️ การลบนี้จะนำงานเดิมออก เพื่อให้คุณสามารถส่งงานใหม่แทนที่ได้สะอาดเรียบร้อย
+          </p>
+        </div>
+      `,
+      icon: 'warning',
+      showCancelButton: true,
+      confirmButtonText: '🗑️ ยืนยันการลบงานเดิม',
+      cancelButtonText: 'ยกเลิก',
+      confirmButtonColor: '#EF4444',
+      cancelButtonColor: '#6B7280',
+      customClass: {
+        popup: 'rounded-3xl font-[\'Kanit\',sans-serif]',
+        confirmButton: 'px-4 py-2 rounded-xl text-xs font-bold',
+        cancelButton: 'px-4 py-2 rounded-xl text-xs font-bold',
+      }
+    });
+
+    if (confirm.isConfirmed) {
+      alertService.loading('กำลังลบงานเดิม...', 'ระบบกำลังลบข้อมูลออกจากระบบ');
+      await storageService.deleteSubmission(oldSub.id, sheetConfig);
+      onSubmissionSuccess();
+      alertService.close();
+      alertService.success('ลบงานเดิมเรียบร้อยแล้ว', 'คุณสามารถกรอกลิงก์ใหม่และกดส่งงานได้ทันที ✨');
+    }
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
@@ -115,6 +165,68 @@ export default function StudentSubmissionView({
       return;
     }
 
+    // Check if student has already submitted this assignment
+    const allSubs = storageService.getSubmissions();
+    const cleanStudentName = studentName.trim();
+    const duplicates = allSubs.filter(s => 
+      s.assignmentId === currentAssignment.id &&
+      s.studentName.trim().toLowerCase() === cleanStudentName.toLowerCase() &&
+      s.gradeLevel === gradeLevel &&
+      s.room === room
+    );
+
+    if (duplicates.length > 0) {
+      const latestDup = duplicates[0];
+      const dupResult = await Swal.fire({
+        title: '⚠️ พบประวัติการส่งงานชิ้นนี้แล้ว',
+        html: `
+          <div class="text-left text-xs space-y-2">
+            <p class="text-gray-800">
+              นักเรียน: <b>${cleanStudentName}</b> (เลขที่ ${studentNumber.trim()} ห้อง ${gradeLevel}/${room})
+            </p>
+            <p class="text-violet-700 font-semibold">
+              งาน: ${currentAssignment.title}
+            </p>
+            <div class="p-2.5 bg-purple-50 rounded-xl border border-purple-200 space-y-1">
+              <p class="text-gray-700">📅 เคยส่งไว้เมื่อ: <b>${latestDup.submittedAt}</b></p>
+              <p class="text-gray-600">สถานะ: <b>${latestDup.status}</b> ${latestDup.score !== null ? `(${latestDup.score}/${latestDup.maxScore} คะแนน)` : ''}</p>
+            </div>
+            <p class="text-gray-700 font-medium pt-1">
+              ต้องการ <b>ลบงานเก่าแล้วส่งงานนี้แทนที่</b> หรือต้องการ <b>ส่งเพิ่ม (เก็บงานเก่าไว้)</b>?
+            </p>
+          </div>
+        `,
+        icon: 'question',
+        showCancelButton: true,
+        showDenyButton: true,
+        confirmButtonText: '🗑️ ลบงานเก่าแล้วส่งใหม่ (แนะนำ)',
+        denyButtonText: '➕ ส่งเพิ่ม (เก็บงานเก่าไว้)',
+        cancelButtonText: 'ยกเลิก',
+        confirmButtonColor: '#EF4444',
+        denyButtonColor: '#7C3AED',
+        cancelButtonColor: '#6B7280',
+        customClass: {
+          popup: 'rounded-3xl font-[\'Kanit\',sans-serif]',
+          confirmButton: 'px-3 py-2 rounded-xl text-xs font-bold',
+          denyButton: 'px-3 py-2 rounded-xl text-xs font-bold',
+          cancelButton: 'px-3 py-2 rounded-xl text-xs font-bold',
+        }
+      });
+
+      if (dupResult.isDismissed) {
+        return; // User cancelled
+      }
+
+      if (dupResult.isConfirmed) {
+        // Delete older duplicate(s)
+        alertService.loading('กำลังลบงานเก่า...', 'ระบบกำลังลบงานเดิมที่เคยส่งออก');
+        for (const dup of duplicates) {
+          await storageService.deleteSubmission(dup.id, sheetConfig);
+        }
+      }
+      // If isDenied (ส่งเพิ่ม), proceed with saving without deleting old ones
+    }
+
     try {
       setIsSubmitting(true);
       alertService.loading('กำลังบันทึกข้อมูลการส่งงาน...', 'ระบบกำลังบันทึกและประมวลผลข้อมูลลง Google Sheet');
@@ -122,7 +234,7 @@ export default function StudentSubmissionView({
       const timestamp = new Date().toLocaleString('th-TH');
       const newSubmission: Submission = {
         id: `SUB-${Date.now()}`,
-        studentName: studentName.trim(),
+        studentName: cleanStudentName,
         studentNumber: studentNumber.trim(),
         gradeLevel,
         room,
@@ -133,6 +245,8 @@ export default function StudentSubmissionView({
         assignmentId: currentAssignment.id,
         assignmentName: currentAssignment.title,
         maxScore: currentAssignment.maxScore,
+        workType: currentAssignment.workType || 'ใบงาน/แบบฝึกหัด',
+        sampleUrl: currentAssignment.sampleUrl,
         academicYear: currentAssignment.academicYear || '2567',
         semester: currentAssignment.semester || '1',
         workUrl: workUrl.trim(),
@@ -155,7 +269,7 @@ export default function StudentSubmissionView({
         setWorkUrl('');
         alertService.success('พร้อมส่งงานชิ้นถัดไป', 'ข้อมูลนักเรียนเดิมถูกเก็บไว้แล้ว สามารถเลือกวิชาและงานชิ้นใหม่ได้ทันที');
       } else {
-        onNavigateToStatus(studentName.trim());
+        onNavigateToStatus(cleanStudentName);
       }
     } catch (err: any) {
       alertService.error('เกิดข้อผิดพลาดในการบันทึก', err?.message || 'โปรดตรวจสอบการเชื่อมต่ออินเทอร์เน็ต');
@@ -169,20 +283,24 @@ export default function StudentSubmissionView({
       {/* Header Banner */}
       <div className="bg-gradient-to-r from-white/95 via-purple-50/60 to-pink-50/60 backdrop-blur-md rounded-3xl p-6 md:p-8 shadow-xl shadow-purple-100/40 border border-purple-100/80">
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-          <div>
-            <div className="inline-flex items-center gap-2 px-3 py-1 bg-violet-100/80 border border-violet-200 text-violet-800 rounded-full text-xs font-semibold mb-2">
-              <Sparkles size={14} className="text-violet-600 animate-spin" />
-              <span>🎒 ระบบส่งงานและตรวจงานออนไลน์ ✨</span>
+          <div className="flex items-start gap-4">
+            <img 
+              src="https://img1.pic.in.th/images/images-39bd26cc1ba9520da.png" 
+              alt="โลโก้โรงเรียนท่าบ่อ" 
+              className="w-14 h-14 md:w-16 md:h-16 object-contain rounded-2xl drop-shadow-md shrink-0 bg-white p-1 border border-amber-200"
+            />
+            <div>
+              <div className="inline-flex items-center gap-2 px-3 py-1 bg-amber-100 border border-amber-200 text-amber-950 rounded-full text-xs font-bold mb-1">
+                <span className="text-sm font-black">🏫 โรงเรียนท่าบ่อ สพม.หนองคาย</span>
+              </div>
+              <h1 className="text-2xl md:text-3xl font-extrabold text-gray-900 tracking-tight flex items-center gap-2">
+                <span>แบบฟอร์มส่งงานนักเรียน</span>
+                <span>📝</span>
+              </h1>
+              <p className="text-xs md:text-sm text-gray-500 mt-1 flex items-center gap-1.5">
+                <span>กรอกข้อมูลให้ครบถ้วนเพื่อส่งงานให้คุณครูตรวจ 🌸</span>
+              </p>
             </div>
-            <h1 className="text-2xl md:text-3xl font-bold text-gray-900 tracking-tight flex items-center gap-2">
-              <span>แบบฟอร์มส่งงานนักเรียน</span>
-              <span>📝</span>
-            </h1>
-            <p className="text-sm text-gray-500 mt-1 flex items-center gap-1.5">
-              <span>🏫 โรงเรียนท่าบ่อ สพม.หนองคาย</span>
-              <span>•</span>
-              <span>กรอกข้อมูลให้ครบถ้วนเพื่อส่งงานให้คุณครูตรวจ 🌸</span>
-            </p>
           </div>
           
           <div className="bg-gradient-to-tr from-sky-50 via-indigo-50 to-purple-50 border border-indigo-100/80 rounded-2xl p-4 flex items-center gap-3 shadow-xs">
@@ -383,14 +501,37 @@ export default function StudentSubmissionView({
               </select>
 
               {currentAssignment && (
-                <div className="mt-3 p-3.5 bg-gradient-to-r from-emerald-50 via-teal-50 to-emerald-50 border border-emerald-200 rounded-2xl flex items-center justify-between text-xs text-emerald-900 shadow-xs">
-                  <div className="flex items-center gap-2">
-                    <CheckCircle2 size={18} className="text-emerald-600" />
-                    <span>งานที่เลือก: <strong>{currentAssignment.title}</strong></span>
+                <div className="mt-3 p-4 bg-gradient-to-r from-emerald-50 via-teal-50 to-purple-50 border border-emerald-200/80 rounded-2xl space-y-2.5 text-xs text-emerald-950 shadow-xs">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                    <div className="flex items-center gap-2">
+                      <CheckCircle2 size={18} className="text-emerald-600 shrink-0" />
+                      <span>งานที่เลือก: <strong>{currentAssignment.title}</strong></span>
+                    </div>
+                    <span className="font-bold bg-emerald-600 text-white px-3 py-1 rounded-xl shadow-xs shrink-0 self-start sm:self-auto">
+                      💯 คะแนนเต็ม {currentAssignment.maxScore} คะแนน
+                    </span>
                   </div>
-                  <span className="font-bold bg-emerald-600 text-white px-3 py-1 rounded-xl shadow-xs">
-                    💯 คะแนนเต็ม {currentAssignment.maxScore} คะแนน
-                  </span>
+
+                  <div className="flex flex-wrap items-center gap-2 pt-1 border-t border-emerald-100/70">
+                    {currentAssignment.workType && (
+                      <span className="inline-flex items-center gap-1 px-2.5 py-1 bg-white/90 text-violet-800 rounded-lg font-semibold border border-purple-200 shadow-2xs">
+                        <span>🏷️ ชนิดงาน:</span>
+                        <span>{currentAssignment.workType}</span>
+                      </span>
+                    )}
+
+                    {currentAssignment.sampleUrl && (
+                      <a
+                        href={currentAssignment.sampleUrl.startsWith('http') ? currentAssignment.sampleUrl : `https://${currentAssignment.sampleUrl}`}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="inline-flex items-center gap-1.5 px-3 py-1 bg-gradient-to-r from-violet-600 to-indigo-600 hover:from-violet-700 hover:to-indigo-700 text-white font-bold rounded-lg shadow-xs transition-all cursor-pointer"
+                      >
+                        <ExternalLink size={13} />
+                        <span>📄 ดูตัวอย่างใบงาน / เอกสารประกอบของคุณครู</span>
+                      </a>
+                    )}
+                  </div>
                 </div>
               )}
             </div>
@@ -428,6 +569,68 @@ export default function StudentSubmissionView({
                 <span>คำแนะนำ: หากแนบลิงก์จาก Google Drive อย่าลืมตั้งค่าการแชร์เป็น "ทุกคนที่มีลิงก์สามารถดูได้" เพื่อให้คุณครูเปิดตรวจได้สะดวก</span>
               </div>
             </div>
+
+            {/* กล่องแจ้งเตือนพบงานที่เคยส่งซ้ำ พร้อมปุ่มลบงานเดิม */}
+            {existingSubmissions.length > 0 && (
+              <div className="md:col-span-12 p-4 bg-amber-50/90 border-2 border-amber-300 rounded-2xl shadow-sm space-y-2">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2 text-amber-950 font-bold text-xs sm:text-sm">
+                    <AlertTriangle size={18} className="text-amber-600 shrink-0" />
+                    <span>⚠️ ตรวจพบว่าคุณเคยส่งงานชิ้นนี้แล้ว ({existingSubmissions.length} รายการ)</span>
+                  </div>
+                  <span className="text-[11px] text-amber-800 bg-amber-200/80 px-2 py-0.5 rounded-full font-semibold">
+                    ส่งงานซ้ำ
+                  </span>
+                </div>
+                <p className="text-xs text-amber-800">
+                  หากต้องการส่งงานใหม่แทนที่ คุณสามารถคลิกปุ่ม <b>"ลบงานเก่านี้"</b> เพื่อลบงานเดิมออกก่อนส่งได้ทันที
+                </p>
+                <div className="space-y-2 pt-1">
+                  {existingSubmissions.map((oldSub) => (
+                    <div 
+                      key={oldSub.id}
+                      className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 p-2.5 bg-white/90 rounded-xl border border-amber-200 text-xs"
+                    >
+                      <div className="space-y-0.5">
+                        <div className="font-semibold text-gray-800 flex items-center gap-1.5">
+                          <span>📅 ส่งเมื่อ: {oldSub.submittedAt}</span>
+                          <span className={`px-1.5 py-0.2 rounded-md text-[10px] font-bold ${
+                            oldSub.status === 'ตรวจแล้ว' ? 'bg-emerald-100 text-emerald-800' : 'bg-amber-100 text-amber-800'
+                          }`}>
+                            {oldSub.status}
+                          </span>
+                        </div>
+                        <div className="text-[11px] text-gray-500 truncate max-w-sm">
+                          ลิงก์เดิม: {oldSub.workUrl}
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-2 shrink-0">
+                        {oldSub.workUrl && (
+                          <a
+                            href={oldSub.workUrl.startsWith('http') ? oldSub.workUrl : `https://${oldSub.workUrl}`}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="px-2.5 py-1 text-violet-700 bg-violet-50 hover:bg-violet-100 border border-violet-200 rounded-lg text-xs font-semibold flex items-center gap-1 transition-colors"
+                          >
+                            <ExternalLink size={11} />
+                            <span>ดูงานเดิม</span>
+                          </a>
+                        )}
+                        <button
+                          type="button"
+                          onClick={() => handleDeleteSpecificOldSubmission(oldSub)}
+                          className="px-2.5 py-1 text-rose-700 bg-rose-50 hover:bg-rose-100 border border-rose-200 rounded-lg text-xs font-bold flex items-center gap-1 transition-colors cursor-pointer"
+                          title="ลบงานเก่าชิ้นนี้ออกจากระบบ"
+                        >
+                          <Trash2 size={12} />
+                          <span>🗑️ ลบงานเก่านี้</span>
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
         </div>
 

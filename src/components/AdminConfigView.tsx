@@ -20,7 +20,8 @@ import {
   Trash2, 
   Search, 
   AlertTriangle,
-  BookOpen
+  BookOpen,
+  KeyRound
 } from 'lucide-react';
 import Swal from 'sweetalert2';
 import { GoogleSheetConfig, Submission, Teacher } from '../types';
@@ -155,6 +156,130 @@ export default function AdminConfigView({
     }
   };
 
+  // Reset teacher credentials handler with SweetAlert2
+  const handleResetTeacherCredentials = async (teacher: Teacher) => {
+    const { value: formValues } = await Swal.fire({
+      title: '🔑 รีเซ็ต Username / Password',
+      html: `
+        <div class="space-y-3 text-left pt-2 font-['Kanit',sans-serif]">
+          <div class="bg-amber-50 p-3.5 rounded-2xl border border-amber-200 text-xs text-amber-900 space-y-1">
+            <p>👩‍🏫 <strong>ชื่อครู:</strong> ${teacher.fullName}</p>
+            <p>🏫 <strong>กลุ่มสาระ:</strong> ${teacher.department}</p>
+            <p>🏷️ <strong>Username เดิม:</strong> <span class="font-mono font-bold">${teacher.username}</span></p>
+            ${teacher.resetRequested ? '<p class="text-rose-600 font-bold flex items-center gap-1"><span>⚠️</span> ครูได้ส่งคำขอรีเซ็ตรหัสผ่านเข้ามาเมื่อ: ' + (teacher.resetRequestedAt || 'เร็วๆ นี้') + '</p>' : ''}
+          </div>
+
+          <div>
+            <label class="block text-xs font-bold text-gray-700 mb-1">👤 Username ใหม่</label>
+            <input 
+              id="swal-reset-username" 
+              type="text" 
+              value="${teacher.username}" 
+              placeholder="ระบุชื่อผู้ใช้ใหม่"
+              class="w-full px-3.5 py-2.5 border border-purple-200 bg-white rounded-xl text-xs font-semibold text-gray-800 focus:outline-none focus:ring-2 focus:ring-purple-400"
+            />
+          </div>
+
+          <div>
+            <div class="flex items-center justify-between mb-1">
+              <label class="block text-xs font-bold text-gray-700">🔑 Password ใหม่</label>
+              <button 
+                type="button" 
+                id="swal-random-pass-btn" 
+                class="text-[11px] text-violet-700 hover:text-violet-900 font-bold cursor-pointer underline"
+              >
+                🎲 สุ่มรหัสผ่าน
+              </button>
+            </div>
+            <input 
+              id="swal-reset-password" 
+              type="text" 
+              value="" 
+              placeholder="กำหนดรหัสผ่านใหม่ (เช่น 1234 หรือ 8899)" 
+              class="w-full px-3.5 py-2.5 border border-purple-200 bg-purple-50/20 rounded-xl text-xs font-semibold text-gray-800 focus:outline-none focus:ring-2 focus:ring-purple-400"
+            />
+          </div>
+        </div>
+      `,
+      showCancelButton: true,
+      confirmButtonText: '💾 บันทึกการรีเซ็ต',
+      cancelButtonText: 'ยกเลิก',
+      confirmButtonColor: '#7C3AED',
+      cancelButtonColor: '#6B7280',
+      customClass: {
+        popup: 'rounded-3xl font-[\'Kanit\',sans-serif] border border-purple-100 shadow-2xl',
+        confirmButton: 'px-5 py-2.5 rounded-xl font-bold text-xs',
+        cancelButton: 'px-5 py-2.5 rounded-xl font-bold text-xs',
+      },
+      didOpen: () => {
+        const randomBtn = document.getElementById('swal-random-pass-btn');
+        const passInput = document.getElementById('swal-reset-password') as HTMLInputElement;
+        if (randomBtn && passInput) {
+          randomBtn.onclick = () => {
+            const randomCode = Math.floor(1000 + Math.random() * 9000).toString();
+            passInput.value = randomCode;
+          };
+        }
+      },
+      preConfirm: () => {
+        const usernameInput = document.getElementById('swal-reset-username') as HTMLInputElement;
+        const passwordInput = document.getElementById('swal-reset-password') as HTMLInputElement;
+        const newUsername = usernameInput?.value?.trim();
+        const newPassword = passwordInput?.value?.trim();
+
+        if (!newUsername || !newPassword) {
+          Swal.showValidationMessage('กรุณาระบุทั้ง Username และ Password ใหม่');
+          return false;
+        }
+
+        return { newUsername, newPassword };
+      }
+    });
+
+    if (formValues) {
+      alertService.loading('กำลังรีเซ็ตรหัสผ่าน...', 'ระบบกำลังบันทึกและซิงค์ข้อมูล');
+      const res = await storageService.resetTeacherCredentials(
+        teacher.id,
+        formValues.newUsername,
+        formValues.newPassword,
+        sheetConfig
+      );
+      alertService.close();
+
+      if (res.success) {
+        await Swal.fire({
+          icon: 'success',
+          title: 'รีเซ็ตข้อมูลสำเร็จ! 🎉',
+          html: `
+            <div class="text-left font-['Kanit',sans-serif] space-y-2.5 text-xs text-gray-700 pt-2">
+              <p>รีเซ็ตข้อมูลการเข้าสู่ระบบของ <strong class="text-violet-700 font-bold">${teacher.fullName}</strong> เรียบร้อยแล้ว</p>
+              <div class="bg-violet-50 p-3.5 rounded-2xl border border-violet-200 space-y-1.5 font-mono text-xs">
+                <div class="flex justify-between items-center">
+                  <span class="text-gray-500 font-sans">Username ใหม่:</span>
+                  <strong class="text-violet-900 bg-white px-2 py-0.5 rounded-md border border-violet-100">${formValues.newUsername}</strong>
+                </div>
+                <div class="flex justify-between items-center">
+                  <span class="text-gray-500 font-sans">Password ใหม่:</span>
+                  <strong class="text-violet-900 bg-white px-2 py-0.5 rounded-md border border-violet-100">${formValues.newPassword}</strong>
+                </div>
+              </div>
+              <p class="text-[11px] text-gray-500">คุณสามารถแจ้งข้อมูลเข้าสู่ระบบใหม่นี้ให้แก่คุณครูเพื่อใช้เข้าสู่ระบบได้ทันที 🌸</p>
+            </div>
+          `,
+          confirmButtonText: 'ตกลง ✨',
+          confirmButtonColor: '#7C3AED',
+          customClass: {
+            popup: 'rounded-3xl font-[\'Kanit\',sans-serif] border border-purple-100 shadow-2xl',
+            confirmButton: 'px-5 py-2.5 rounded-xl font-bold',
+          },
+        });
+        onDataChange();
+      } else {
+        alertService.error('การรีเซ็ตไม่สำเร็จ', res.message);
+      }
+    }
+  };
+
   // Save sheet config
   const handleSaveConfig = (e: React.FormEvent) => {
     e.preventDefault();
@@ -253,7 +378,10 @@ export default function AdminConfigView({
               }`}
             >
               <span>👩‍🏫</span>
-              <span>ลบข้อมูลครู ({teachers.length})</span>
+              <span>จัดการครู/รีเซ็ตรหัสผ่าน ({teachers.length})</span>
+              {teachers.some(t => t.resetRequested) && (
+                <span className="w-2.5 h-2.5 rounded-full bg-rose-500 animate-pulse" title="มีคำขอรีเซ็ตรหัสผ่าน" />
+              )}
             </button>
             <button
               onClick={() => setAdminTab('config')}
@@ -384,10 +512,10 @@ export default function AdminConfigView({
             <div>
               <h2 className="text-lg font-bold text-gray-900 flex items-center gap-2">
                 <GraduationCap size={20} className="text-indigo-600" />
-                ค้นหาและลบข้อมูลครูผู้สอน
+                จัดการข้อมูลครู & รีเซ็ต Username / Password
               </h2>
               <p className="text-xs text-gray-500 mt-0.5">
-                ค้นหาชื่อครูเพื่อจัดการหรือลบบัญชีออกจากระบบ
+                ค้นหาชื่อครูเพื่อรีเซ็ต Username/Password หรือลบบัญชีออกจากระบบ 🌸
               </p>
             </div>
 
@@ -423,15 +551,24 @@ export default function AdminConfigView({
                     <th className="py-3 px-4">ชื่อ-นามสกุล ครูผู้สอน</th>
                     <th className="py-3 px-4">กลุ่มสาระการเรียนรู้</th>
                     <th className="py-3 px-4 text-center">Username</th>
+                    <th className="py-3 px-4 text-center">Password</th>
                     <th className="py-3 px-4 text-center">วันที่สมัคร</th>
                     <th className="py-3 px-4 text-center">จัดการ</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-100 text-xs">
                   {filteredTeachers.map((t) => (
-                    <tr key={t.id} className="hover:bg-red-50/20 transition-colors">
+                    <tr key={t.id} className="hover:bg-purple-50/20 transition-colors">
                       <td className="py-3 px-4 font-bold text-gray-900">
-                        {t.fullName}
+                        <div className="flex flex-col sm:flex-row sm:items-center gap-1.5">
+                          <span>{t.fullName}</span>
+                          {t.resetRequested && (
+                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-rose-100 text-rose-700 text-[10px] font-bold border border-rose-200 animate-pulse w-fit" title={`ส่งคำขอเมื่อ ${t.resetRequestedAt || ''}`}>
+                              <span>🔑</span>
+                              <span>ขอรีเซ็ตรหัส</span>
+                            </span>
+                          )}
+                        </div>
                       </td>
                       <td className="py-3 px-4 text-gray-600">
                         {t.department}
@@ -439,18 +576,31 @@ export default function AdminConfigView({
                       <td className="py-3 px-4 text-center font-mono text-indigo-700 font-semibold">
                         {t.username}
                       </td>
+                      <td className="py-3 px-4 text-center font-mono text-gray-400">
+                        ••••••
+                      </td>
                       <td className="py-3 px-4 text-center text-gray-400">
                         {t.createdAt}
                       </td>
                       <td className="py-3 px-4 text-center">
-                        <button
-                          onClick={() => handleDeleteTeacher(t)}
-                          className="inline-flex items-center gap-1 px-3.5 py-1.5 bg-red-50 hover:bg-red-600 hover:text-white text-red-600 rounded-xl text-xs font-semibold transition-colors shadow-sm cursor-pointer"
-                          title="ลบข้อมูลครูผู้สอนนี้"
-                        >
-                          <Trash2 size={13} />
-                          <span>ลบครู</span>
-                        </button>
+                        <div className="flex items-center justify-center gap-1.5">
+                          <button
+                            onClick={() => handleResetTeacherCredentials(t)}
+                            className="inline-flex items-center gap-1 px-2.5 py-1.5 bg-amber-50 hover:bg-amber-600 hover:text-white text-amber-800 rounded-xl text-xs font-semibold border border-amber-200/80 transition-colors shadow-xs cursor-pointer"
+                            title="รีเซ็ต Username และ Password"
+                          >
+                            <KeyRound size={12} />
+                            <span>รีเซ็ต User/Pass</span>
+                          </button>
+                          <button
+                            onClick={() => handleDeleteTeacher(t)}
+                            className="inline-flex items-center gap-1 px-2.5 py-1.5 bg-red-50 hover:bg-red-600 hover:text-white text-red-600 rounded-xl text-xs font-semibold transition-colors shadow-xs cursor-pointer"
+                            title="ลบข้อมูลครูผู้สอนนี้"
+                          >
+                            <Trash2 size={12} />
+                            <span>ลบ</span>
+                          </button>
+                        </div>
                       </td>
                     </tr>
                   ))}

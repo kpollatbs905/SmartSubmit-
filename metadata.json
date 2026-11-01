@@ -1,10 +1,13 @@
 {
   "name": "AI Smart Teacher Assistant",
   "description": "An intelligent classroom management system for teachers and students, featuring AI-powered assignment feedback and student risk analysis.",
-  "requestFramePermissions": [],
+  "requestFramePermissions": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ],
   "majorCapabilities": [
     "AI-powered grading assistant",
     "Student risk level analysis",
-    "Real-time feedback for students"
+    "Real-time feedback for students",
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
   ]
 }
