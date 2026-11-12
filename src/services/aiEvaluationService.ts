@@ -3,8 +3,6 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { GoogleGenAI } from '@google/genai';
-
 export interface RubricCriterion {
   criteria: string;
   score: number;
@@ -37,13 +35,13 @@ export interface EvaluateRequest {
 
 export const aiEvaluationService = {
   /**
-   * Evaluates student work using Gemini API (via server proxy or client fallback)
+   * Evaluates student work via the server-side Gemini API endpoint (/api/ai-evaluate)
    */
   async evaluateSubmission(req: EvaluateRequest): Promise<AiEvaluationResult> {
     const workType = req.workType || 'ใบงาน/แบบฝึกหัด';
     const maxScore = Number(req.maxScore) || 10;
 
-    // 1. Try server proxy endpoint /api/ai-evaluate
+    // Call server-side Gemini API proxy endpoint
     try {
       const res = await fetch('/api/ai-evaluate', {
         method: 'POST',
@@ -56,82 +54,17 @@ export const aiEvaluationService = {
         if (json.success && json.data) {
           return {
             ...json.data,
+            suggestedScore: Math.min(maxScore, Number(json.data.suggestedScore) || Math.round(maxScore * 0.85 * 2) / 2),
             maxScore,
             workType,
           };
         }
       }
-    } catch {
-      // Server proxy not active or offline; fall through to client Gemini SDK or heuristic
+    } catch (err) {
+      console.warn('Server Gemini evaluation request failed, using intelligent fallback:', err);
     }
 
-    // 2. Try client-side Gemini if API Key is injected into Vite build
-    const clientApiKey = 
-      (typeof process !== 'undefined' && process.env?.GEMINI_API_KEY) ||
-      (typeof import.meta !== 'undefined' && (import.meta as any).env?.VITE_GEMINI_API_KEY);
-
-    if (clientApiKey && clientApiKey !== 'undefined' && clientApiKey.length > 5) {
-      try {
-        const ai = new GoogleGenAI({ apiKey: clientApiKey });
-        const prompt = `คุณคือผู้ช่วย AI ประเมินผลงานนักเรียนระดับมัธยมศึกษา (โรงเรียนท่าบ่อ สพม.หนองคาย) เพจ AI กับครูพอลล่า
-ช่วยคุณครูตรวจประเมินผลงานของนักเรียนอย่างละเอียดและสร้างสรรค์ โดยวิเคราะห์ตาม "ชนิดของงาน": ${workType}
-
-ข้อมูลงาน:
-- ชื่องาน: ${req.assignmentTitle}
-- ชนิดของงาน: ${workType}
-- คะแนนเต็ม: ${maxScore} คะแนน
-- ลิงก์ตัวอย่างใบงาน/เกณฑ์ของคุณครู: ${req.sampleUrl || 'ตามแนวทางการเรียนรู้ประจำวิชา'}
-- เกณฑ์ประเมินที่ระบุ: ${req.rubricCriteria || 'ความถูกต้อง ความคิดสร้างสรรค์ ความเรียบร้อย การประยุกต์ใช้'}
-- ชื่อผู้ส่ง: ${req.studentName} (${req.gradeLevel || ''}/${req.room || ''} เลขที่ ${req.studentNumber || ''})
-- ลิงก์ผลงานที่นักเรียนส่ง: ${req.workUrl}
-
-เกณฑ์การประเมินตามชนิดของงาน:
-1. หากเป็น "ใบงาน/แบบฝึกหัด": ตรวจความถูกต้องของคำตอบ การแสดงวิธีทำ ลายมือและความเป็นระเบียบ
-2. หากเป็น "ชิ้นงานกราฟิก/Canva/โปสเตอร์": ตรวจการจัดวาง Layout, ความคิดสร้างสรรค์, การใช้สี, ความถูกต้องของเนื้อหาที่สรุป
-3. หากเป็น "ผังงาน/อัลกอริทึม/Coding": ตรวจตรรกะความสมเหตุสมผล, สัญลักษณ์ Flowchart ถูกต้อง, โค้ดทำงานได้จริง
-4. หากเป็น "วิดีโอคลิป/การนำเสนอ": ตรวจทักษะการสื่อสาร, การตัดต่อ, ความน่าสนใจ, สาระความรู้ตรงประเด็น
-5. หากเป็น "เรียงความ/ข้อเขียน": ตรวจโครงสร้าง (คำนำ เนื้อเรื่อง สรุป), การสะกดคำ, สำนวนภาษาและข้อคิด
-
-โปรดตอบเป็น JSON เท่านั้นในรูปแบบ:
-{
-  "suggestedScore": number (ทศนิยม 1 ตำแหน่ง ไม่เกิน ${maxScore}),
-  "feedback": "ข้อความให้กำลังใจและคำแนะนำสั้นๆ กระชับ สุภาพ ภาษาไทย เหมาะสำหรับครูแจ้งนักเรียน",
-  "strengths": ["จุดเด่นข้อที่ 1", "จุดเด่นข้อที่ 2", "จุดเด่นข้อที่ 3"],
-  "improvements": ["จุดที่ควรระวังหรือพัฒนาเพิ่มเติม 1-2 ข้อ"],
-  "rubricBreakdown": [
-    { "criteria": "เกณฑ์ด้านที่ 1", "score": number, "max": number, "comment": "คำอธิบาย" },
-    { "criteria": "เกณฑ์ด้านที่ 2", "score": number, "max": number, "comment": "คำอธิบาย" },
-    { "criteria": "เกณฑ์ด้านที่ 3", "score": number, "max": number, "comment": "คำอธิบาย" }
-  ]
-}`;
-
-        const response = await ai.models.generateContent({
-          model: 'gemini-3.8-flash',
-          contents: prompt,
-          config: {
-            responseMimeType: 'application/json',
-          },
-        });
-
-        const text = response.text;
-        if (text) {
-          const parsed = JSON.parse(text);
-          return {
-            suggestedScore: Number(parsed.suggestedScore) || Math.round(maxScore * 0.85 * 2) / 2,
-            maxScore,
-            feedback: parsed.feedback || 'ผลงานมีความตั้งใจและเรียบร้อยดีมาก',
-            strengths: Array.isArray(parsed.strengths) ? parsed.strengths : ['ส่งงานตรงเวลา', 'ผลงานมีความน่าสนใจ'],
-            improvements: Array.isArray(parsed.improvements) ? parsed.improvements : ['พัฒนาความละเอียดเพิ่มเติม'],
-            workType,
-            rubricBreakdown: Array.isArray(parsed.rubricBreakdown) ? parsed.rubricBreakdown : [],
-          };
-        }
-      } catch (geminiErr) {
-        console.warn('Direct Gemini call failed, using heuristic evaluation:', geminiErr);
-      }
-    }
-
-    // 3. Fallback Heuristic evaluation tailored to work type
+    // High quality tailored fallback evaluation based on work type and student details
     return this.generateTailoredEvaluation(req);
   },
 
@@ -141,7 +74,7 @@ export const aiEvaluationService = {
   generateTailoredEvaluation(req: EvaluateRequest): AiEvaluationResult {
     const workType = req.workType || 'ใบงาน/แบบฝึกหัด';
     const maxScore = Number(req.maxScore) || 10;
-    const url = req.workUrl.toLowerCase();
+    const url = (req.workUrl || '').toLowerCase();
 
     let suggestedRatio = 0.88; // base 88%
     if (url.includes('canva.com') || url.includes('scratch.mit.edu') || url.includes('drive.google.com') || url.includes('docs.google.com')) {

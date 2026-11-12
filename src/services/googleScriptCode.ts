@@ -287,18 +287,56 @@ function doPost(e) {
       });
     }
 
-    // 6. ลบข้อมูลการส่งงานของนักเรียน (Admin)
+    // 6. ลบข้อมูลการส่งงานของนักเรียน (ลบงานเดี่ยว / งานส่งซ้ำ)
     if (action === 'deleteSubmission') {
       const sheet = ss.getSheetByName(SHEET_NAMES.SUBMISSIONS);
       const rows = sheet.getDataRange().getValues();
-      const id = body.id;
+      const id = body.id ? String(body.id).trim() : '';
+      const studentName = body.studentName ? String(body.studentName).trim().toLowerCase() : '';
+      const studentNumber = body.studentNumber ? String(body.studentNumber).trim() : '';
+      const assignmentName = body.assignmentName ? String(body.assignmentName).trim().toLowerCase() : '';
+      const workUrl = body.workUrl ? String(body.workUrl).trim() : '';
+
+      let found = false;
       for (let i = 1; i < rows.length; i++) {
-        if (String(rows[i][0]) === String(id)) {
+        const rowId = String(rows[i][0] || '').trim();
+        const rowName = String(rows[i][2] || '').trim().toLowerCase();
+        const rowNum = String(rows[i][3] || '').trim();
+        const rowAssign = String(rows[i][9] || '').trim().toLowerCase();
+        const rowUrl = String(rows[i][11] || '').trim();
+
+        const matchId = id && rowId === id;
+        const matchInfo = studentName && rowName.includes(studentName.replace(/^(ด\.ช\.|ด\.ญ\.|นาย|นางสาว|น\.ส\.)\s*/i, '')) &&
+          (!studentNumber || rowNum === studentNumber) &&
+          ((assignmentName && rowAssign === assignmentName) || (workUrl && rowUrl === workUrl));
+
+        if (matchId || matchInfo) {
           sheet.deleteRow(i + 1);
+          found = true;
           break;
         }
       }
-      return responseJSON({ status: 'success', message: 'ลบข้อมูลการส่งงานสำเร็จ' });
+      return responseJSON({ 
+        status: found ? 'success' : 'not_found', 
+        message: found ? 'ลบข้อมูลการส่งงานออกจากฐานข้อมูลสำเร็จ' : 'ไม่พบข้อมูลที่ต้องการลบใน Google Sheet' 
+      });
+    }
+
+    // 6.1 ลบข้อมูลการส่งงานหลายรายการ / งานส่งซ้ำ
+    if (action === 'deleteMultipleSubmissions') {
+      const sheet = ss.getSheetByName(SHEET_NAMES.SUBMISSIONS);
+      const rows = sheet.getDataRange().getValues();
+      const idList = Array.isArray(body.ids) ? body.ids.map(function(x) { return String(x).trim(); }) : [];
+      var deleted = 0;
+      // ลบจากแถวล่างขึ้นบนเพื่อป้องกัน index เลื่อน
+      for (var i = rows.length - 1; i >= 1; i--) {
+        var rowId = String(rows[i][0] || '').trim();
+        if (idList.indexOf(rowId) !== -1) {
+          sheet.deleteRow(i + 1);
+          deleted++;
+        }
+      }
+      return responseJSON({ status: 'success', message: 'ลบข้อมูลสำเร็จ ' + deleted + ' รายการ' });
     }
 
     // 7. ลบข้อมูลครูผู้สอน (Admin)

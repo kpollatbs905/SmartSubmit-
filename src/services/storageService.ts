@@ -15,6 +15,13 @@ const STORAGE_KEYS = {
   SHEET_CONFIG: 'tha_bo_sheet_config_v2',
   ACTIVE_TEACHER: 'tha_bo_active_teacher_v2',
   STUDENT_ROSTER: 'tha_bo_student_roster_v2',
+  DELETED_SUBMISSION_IDS: 'tha_bo_deleted_submission_ids_v1',
+  DELETED_SUBMISSION_KEYS: 'tha_bo_deleted_submission_keys_v1',
+};
+
+export const stripThaiPrefix = (name: string): string => {
+  if (!name) return '';
+  return name.trim().replace(/^(ด\.ช\.|ด\.ญ\.|เด็กชาย|เด็กหญิง|นาย|นางสาว|น\.ส\.|นาง)\s*/i, '').trim();
 };
 
 export const normalizeRoom = (val: any): string => {
@@ -197,8 +204,58 @@ export const storageService = {
     return { success: true, message: 'บันทึกผลการประเมินจาก AI สำเร็จ' };
   },
 
-  async deleteSubmission(id: string, config?: GoogleSheetConfig): Promise<{ success: boolean; message: string }> {
+  getDeletedSubmissionIds(): Set<string> {
+    try {
+      const data = localStorage.getItem(STORAGE_KEYS.DELETED_SUBMISSION_IDS);
+      return new Set(data ? JSON.parse(data) : []);
+    } catch {
+      return new Set();
+    }
+  },
+
+  getDeletedSubmissionKeys(): Set<string> {
+    try {
+      const data = localStorage.getItem(STORAGE_KEYS.DELETED_SUBMISSION_KEYS);
+      return new Set(data ? JSON.parse(data) : []);
+    } catch {
+      return new Set();
+    }
+  },
+
+  recordDeletedSubmission(sub: { id?: string; studentName?: string; studentNumber?: string; assignmentName?: string; workUrl?: string }) {
+    try {
+      if (sub.id) {
+        const ids = this.getDeletedSubmissionIds();
+        ids.add(sub.id);
+        localStorage.setItem(STORAGE_KEYS.DELETED_SUBMISSION_IDS, JSON.stringify(Array.from(ids).slice(-2000)));
+      }
+
+      if (sub.studentName && (sub.assignmentName || sub.workUrl)) {
+        const keys = this.getDeletedSubmissionKeys();
+        const cleanName = stripThaiPrefix(sub.studentName).toLowerCase();
+        const cleanNum = String(sub.studentNumber || '').trim();
+        const cleanAssign = (sub.assignmentName || '').trim().toLowerCase();
+        const cleanUrl = (sub.workUrl || '').trim();
+        const key = `${cleanName}_${cleanNum}_${cleanAssign}_${cleanUrl}`;
+        keys.add(key);
+        localStorage.setItem(STORAGE_KEYS.DELETED_SUBMISSION_KEYS, JSON.stringify(Array.from(keys).slice(-2000)));
+      }
+    } catch (err) {
+      console.warn('Failed to record deleted submission:', err);
+    }
+  },
+
+  async deleteSubmission(submissionOrId: string | Submission, config?: GoogleSheetConfig): Promise<{ success: boolean; message: string }> {
     const list = this.getSubmissions();
+    const id = typeof submissionOrId === 'string' ? submissionOrId : submissionOrId.id;
+    const subObj = typeof submissionOrId === 'object' ? submissionOrId : list.find(s => s.id === id);
+
+    if (subObj) {
+      this.recordDeletedSubmission(subObj);
+    } else if (id) {
+      this.recordDeletedSubmission({ id });
+    }
+
     const updated = list.filter(s => s.id !== id);
     this.saveSubmissions(updated);
 
@@ -208,25 +265,52 @@ export const storageService = {
           method: 'POST',
           mode: 'no-cors',
           headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-          body: JSON.stringify({ action: 'deleteSubmission', id }),
+          body: JSON.stringify({ 
+            action: 'deleteSubmission', 
+            id,
+            studentName: subObj?.studentName,
+            studentNumber: subObj?.studentNumber,
+            gradeLevel: subObj?.gradeLevel,
+            room: subObj?.room,
+            assignmentName: subObj?.assignmentName,
+            subjectCode: subObj?.subjectCode,
+            workUrl: subObj?.workUrl,
+            submittedAt: subObj?.submittedAt,
+          }),
         });
       } catch (err) {
         console.warn('Delete submission sync err:', err);
       }
     }
 
-    return { success: true, message: 'ลบข้อมูลการส่งงานเรียบร้อยแล้ว' };
+    return { success: true, message: 'ลบข้อมูลการส่งงานออกจากฐานข้อมูลเรียบร้อยแล้ว' };
   },
 
   async deleteMultipleSubmissions(
-    ids: string[], 
+    itemsOrIds: (string | Submission)[], 
     config?: GoogleSheetConfig
   ): Promise<{ success: boolean; count: number; message: string }> {
-    if (!ids || ids.length === 0) {
+    if (!itemsOrIds || itemsOrIds.length === 0) {
       return { success: true, count: 0, message: 'ไม่มีรายการที่ต้องลบ' };
     }
-    const idSet = new Set(ids);
     const list = this.getSubmissions();
+    const idSet = new Set<string>();
+    const subObjects: (Submission | { id: string })[] = [];
+
+    itemsOrIds.forEach(item => {
+      if (typeof item === 'string') {
+        idSet.add(item);
+        const found = list.find(s => s.id === item);
+        if (found) subObjects.push(found);
+        else subObjects.push({ id: item });
+      } else if (item && item.id) {
+        idSet.add(item.id);
+        subObjects.push(item);
+      }
+    });
+
+    subObjects.forEach(s => this.recordDeletedSubmission(s));
+
     const updated = list.filter(s => !idSet.has(s.id));
     const deletedCount = list.length - updated.length;
     this.saveSubmissions(updated);
@@ -239,7 +323,19 @@ export const storageService = {
           headers: { 'Content-Type': 'text/plain;charset=utf-8' },
           body: JSON.stringify({ 
             action: 'deleteMultipleSubmissions', 
-            ids: Array.from(idSet) 
+            ids: Array.from(idSet),
+            items: subObjects.map(s => {
+              const full = s as Submission;
+              return {
+                id: s.id,
+                studentName: full.studentName,
+                studentNumber: full.studentNumber,
+                gradeLevel: full.gradeLevel,
+                room: full.room,
+                assignmentName: full.assignmentName,
+                workUrl: full.workUrl,
+              };
+            })
           }),
         });
       } catch (err) {
@@ -814,26 +910,43 @@ export const storageService = {
         const { submissions, teachers, assignments, sheetId } = json.data;
         
         if (Array.isArray(submissions) && submissions.length > 0) {
-          const formatted: Submission[] = submissions.map((row: any, i: number) => ({
-            id: row['รหัสการส่ง (ID)'] || row.id || `SUB-SHEET-${i}`,
-            submittedAt: row['วันที่ส่งงาน'] || row.submittedAt || new Date().toLocaleString('th-TH'),
-            studentName: row['ชื่อ-นามสกุล'] || row.studentName || 'ไม่ระบุชื่อ',
-            studentNumber: String(row['เลขที่'] || row.studentNumber || '-'),
-            gradeLevel: (row['ระดับชั้น'] || row.gradeLevel || 'ม.1') as any,
-            room: String(row['ห้อง'] || row.room || '1'),
-            teacherName: row['ครูผู้สอน'] || row.teacherName || '',
-            subjectCode: row['รหัสวิชา'] || row.subjectCode || '',
-            subjectName: row['ชื่อวิชา'] || row.subjectName || '',
-            assignmentId: `A-${i}`,
-            assignmentName: row['ชื่องาน'] || row.assignmentName || 'งานที่ส่ง',
-            maxScore: Number(row['คะแนนเต็ม'] || row.maxScore || 10),
-            workUrl: row['ลิงก์ผลงาน'] || row.workUrl || '',
-            score: row['คะแนนที่ได้'] !== '' && row['คะแนนที่ได้'] !== undefined && row['คะแนนที่ได้'] !== null ? Number(row['คะแนนที่ได้']) : null,
-            status: (row['สถานะ'] || (row['คะแนนที่ได้'] !== '' && row['คะแนนที่ได้'] !== undefined ? 'ตรวจแล้ว' : 'รอตรวจ')) as any,
-            feedback: row['คำแนะนำ/ข้อเสนอแนะ'] || row.feedback || '',
-            gradedAt: row['วันที่ตรวจ'] || row.gradedAt || '',
-            gradedBy: row['ผู้ตรวจ'] || row.gradedBy || '',
-          }));
+          const deletedIds = this.getDeletedSubmissionIds();
+          const deletedKeys = this.getDeletedSubmissionKeys();
+
+          const formatted: Submission[] = submissions
+            .map((row: any, i: number) => ({
+              id: row['รหัสการส่ง (ID)'] || row.id || `SUB-SHEET-${i}`,
+              submittedAt: row['วันที่ส่งงาน'] || row.submittedAt || new Date().toLocaleString('th-TH'),
+              studentName: row['ชื่อ-นามสกุล'] || row.studentName || 'ไม่ระบุชื่อ',
+              studentNumber: String(row['เลขที่'] || row.studentNumber || '-'),
+              gradeLevel: (row['ระดับชั้น'] || row.gradeLevel || 'ม.1') as any,
+              room: String(row['ห้อง'] || row.room || '1'),
+              teacherName: row['ครูผู้สอน'] || row.teacherName || '',
+              subjectCode: row['รหัสวิชา'] || row.subjectCode || '',
+              subjectName: row['ชื่อวิชา'] || row.subjectName || '',
+              assignmentId: `A-${i}`,
+              assignmentName: row['ชื่องาน'] || row.assignmentName || 'งานที่ส่ง',
+              maxScore: Number(row['คะแนนเต็ม'] || row.maxScore || 10),
+              workUrl: row['ลิงก์ผลงาน'] || row.workUrl || '',
+              score: row['คะแนนที่ได้'] !== '' && row['คะแนนที่ได้'] !== undefined && row['คะแนนที่ได้'] !== null ? Number(row['คะแนนที่ได้']) : null,
+              status: (row['สถานะ'] || (row['คะแนนที่ได้'] !== '' && row['คะแนนที่ได้'] !== undefined ? 'ตรวจแล้ว' : 'รอตรวจ')) as any,
+              feedback: row['คำแนะนำ/ข้อเสนอแนะ'] || row.feedback || '',
+              gradedAt: row['วันที่ตรวจ'] || row.gradedAt || '',
+              gradedBy: row['ผู้ตรวจ'] || row.gradedBy || '',
+            }))
+            .filter((sub: Submission) => {
+              if (deletedIds.has(sub.id)) return false;
+              if (sub.studentName && (sub.assignmentName || sub.workUrl)) {
+                const cleanName = stripThaiPrefix(sub.studentName).toLowerCase();
+                const cleanNum = String(sub.studentNumber || '').trim();
+                const cleanAssign = (sub.assignmentName || '').trim().toLowerCase();
+                const cleanUrl = (sub.workUrl || '').trim();
+                const key = `${cleanName}_${cleanNum}_${cleanAssign}_${cleanUrl}`;
+                if (deletedKeys.has(key)) return false;
+              }
+              return true;
+            });
+
           this.saveSubmissions(formatted);
         }
 

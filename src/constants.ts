@@ -28,7 +28,7 @@ export const GRADE_LEVELS = ['ม.1', 'ม.2', 'ม.3', 'ม.4', 'ม.5', 'ม.6
 
 export const ROOMS = Array.from({ length: 14 }, (_, i) => String(i + 1));
 
-export const ACADEMIC_YEARS = ['2567', '2568', '2569', '2570'];
+export const ACADEMIC_YEARS = ['2568'];
 
 export const SEMESTERS = [
   { value: '1', label: 'ภาคเรียนที่ 1' },
@@ -85,10 +85,10 @@ export const INITIAL_TEACHERS: Teacher[] = [
 ];
 
 export const INITIAL_SUBJECTS: Subject[] = [
-  { id: 'SUBJ-001', code: 'ว21103', name: 'วิทยาการคำนวณ 1', teacherName: 'ครูชมัยพร ถินสำราญ', academicYear: '2567', semester: '1' },
-  { id: 'SUBJ-002', code: 'ว22103', name: 'การออกแบบและเทคโนโลยี 2', teacherName: 'ครูชมัยพร ถินสำราญ', academicYear: '2567', semester: '1' },
-  { id: 'SUBJ-003', code: 'ค21101', name: 'คณิตศาสตร์พื้นฐาน 1', teacherName: 'ครูสมศักดิ์ รักการสอน', academicYear: '2567', semester: '1' },
-  { id: 'SUBJ-004', code: 'ท21101', name: 'ภาษาไทยพื้นฐาน 1', teacherName: 'ครูปรียานุช สอนดี', academicYear: '2567', semester: '1' },
+  { id: 'SUBJ-001', code: 'ว21103', name: 'วิทยาการคำนวณ 1', teacherName: 'ครูชมัยพร ถินสำราญ', academicYear: '2568', semester: '1' },
+  { id: 'SUBJ-002', code: 'ว22103', name: 'การออกแบบและเทคโนโลยี 2', teacherName: 'ครูชมัยพร ถินสำราญ', academicYear: '2568', semester: '1' },
+  { id: 'SUBJ-003', code: 'ค21101', name: 'คณิตศาสตร์พื้นฐาน 1', teacherName: 'ครูสมศักดิ์ รักการสอน', academicYear: '2568', semester: '1' },
+  { id: 'SUBJ-004', code: 'ท21101', name: 'ภาษาไทยพื้นฐาน 1', teacherName: 'ครูปรียานุช สอนดี', academicYear: '2568', semester: '1' },
 ];
 
 export const INITIAL_ASSIGNMENTS: Assignment[] = [
@@ -102,7 +102,7 @@ export const INITIAL_ASSIGNMENTS: Assignment[] = [
     workType: 'ผังงาน/อัลกอริทึม/Coding',
     sampleUrl: 'https://docs.google.com/presentation/d/1_example_flowchart_worksheet/preview',
     rubricCriteria: 'ความถูกต้องของสัญลักษณ์ Flowchart (4 คะแนน), ลำดับตรรกะและการตัดสินใจ (4 คะแนน), ความคิดสร้างสรรค์และความเรียบร้อย (2 คะแนน)',
-    academicYear: '2567',
+    academicYear: '2568',
     semester: '1',
     createdAt: '2024-05-10 08:30:00',
   },
@@ -116,7 +116,7 @@ export const INITIAL_ASSIGNMENTS: Assignment[] = [
     workType: 'ผังงาน/อัลกอริทึม/Coding',
     sampleUrl: 'https://scratch.mit.edu/projects/sample_animation_guide',
     rubricCriteria: 'ความสมบูรณ์ของโค้ดบล็อก Scratch (8 คะแนน), การโต้ตอบและการทำงานไม่ค้าง (6 คะแนน), ความคิดสร้างสรรค์และเสียงประกอบ (6 คะแนน)',
-    academicYear: '2567',
+    academicYear: '2568',
     semester: '1',
     createdAt: '2024-05-15 09:00:00',
   },
@@ -130,7 +130,7 @@ export const INITIAL_ASSIGNMENTS: Assignment[] = [
     workType: 'ใบงาน/แบบฝึกหัด',
     sampleUrl: 'https://drive.google.com/file/d/sample_math_exercise/view',
     rubricCriteria: 'แสดงวิธีทำถูกต้องตามขั้นตอน (10 คะแนน), คำตอบสุดท้ายถูกต้องและเขียนลายมือเรียบร้อย (5 คะแนน)',
-    academicYear: '2567',
+    academicYear: '2568',
     semester: '1',
     createdAt: '2024-05-18 10:20:00',
   },
@@ -144,7 +144,7 @@ export const INITIAL_ASSIGNMENTS: Assignment[] = [
     workType: 'เรียงความ/บทความ/ข้อเขียน',
     sampleUrl: 'https://docs.google.com/document/d/sample_thai_essay_guidelines/view',
     rubricCriteria: 'โครงสร้างเรียงความ คำนำ-เนื้อเรื่อง-สรุป (4 คะแนน), การใช้ภาษาและวรรณยุกต์ถูกต้อง (3 คะแนน), เนื้อหามีคุณค่าและข้อคิด (3 คะแนน)',
-    academicYear: '2567',
+    academicYear: '2568',
     semester: '1',
     createdAt: '2024-05-20 11:00:00',
   },

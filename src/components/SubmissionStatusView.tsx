@@ -37,7 +37,7 @@ import {
 import Swal from 'sweetalert2';
 import { Submission, GradeLevel, GoogleSheetConfig, Assignment, Teacher } from '../types';
 import { GRADE_LEVELS, ROOMS } from '../constants';
-import { storageService } from '../services/storageService';
+import { storageService, normalizeRoom, normalizeGradeLevel, stripThaiPrefix } from '../services/storageService';
 import { alertService } from '../services/alertService';
 
 interface Props {
@@ -354,15 +354,43 @@ export default function SubmissionStatusView({
     }
   };
 
-  // Delete submission (any submission or duplicate)
+  // ตรวจสอบว่าชิ้นงานนี้เป็นงานที่ส่งซ้ำหรือไม่ (นักเรียนคนเดียวกัน ระดับชั้น/ห้องเดียวกัน ในวิชาและงานเดียวกัน)
+  const isDuplicateItem = React.useCallback((item: Submission) => {
+    const cleanItemName = stripThaiPrefix(item.studentName).toLowerCase();
+    const cleanItemNum = String(item.studentNumber || '').trim();
+    const cleanItemGrade = normalizeGradeLevel(item.gradeLevel);
+    const cleanItemRoom = normalizeRoom(item.room);
+    const cleanItemAssign = (item.assignmentName || '').trim().toLowerCase();
+
+    return submissions.some(s => {
+      if (s.id === item.id) return false;
+      const cleanName = stripThaiPrefix(s.studentName).toLowerCase();
+      const cleanNum = String(s.studentNumber || '').trim();
+      const cleanGrade = normalizeGradeLevel(s.gradeLevel);
+      const cleanRoom = normalizeRoom(s.room);
+      const cleanAssign = (s.assignmentName || '').trim().toLowerCase();
+
+      const sameStudent = (cleanNum && cleanItemNum && cleanNum === cleanItemNum && cleanGrade === cleanItemGrade && cleanRoom === cleanItemRoom) ||
+        (cleanName && cleanName === cleanItemName && cleanGrade === cleanItemGrade && cleanRoom === cleanItemRoom);
+
+      const sameAssignment = (s.assignmentId && item.assignmentId && s.assignmentId === item.assignmentId) ||
+        (cleanAssign && cleanAssign === cleanItemAssign);
+
+      return sameStudent && sameAssignment;
+    });
+  }, [submissions]);
+
+  // รายการที่มีการส่งซ้ำในผลการค้นหา/กรอง
+  const duplicateSubmissions = useMemo(() => {
+    return filteredSubmissions.filter(s => isDuplicateItem(s));
+  }, [filteredSubmissions, isDuplicateItem]);
+
+  // Delete submission (any submission or duplicate) - ลบออกจากทั้งเครื่องและฐานข้อมูล Google Sheet
   const handleDeleteSubmission = async (item: Submission) => {
-    const isDup = filteredSubmissions.filter(s => 
-      s.assignmentId === item.assignmentId || 
-      s.assignmentName === item.assignmentName
-    ).length > 1;
+    const isDup = isDuplicateItem(item);
 
     const result = await Swal.fire({
-      title: isDup ? '🗑️ ลบงานที่ส่งซ้ำ?' : '🗑️ ยืนยันการลบผลงานนี้?',
+      title: isDup ? '🗑️ ลบงานที่ส่งซ้ำออกจากฐานข้อมูล?' : '🗑️ ยืนยันการลบผลงานออกจากฐานข้อมูล?',
       html: `
         <div class="text-left text-xs space-y-2.5">
           <p class="font-bold text-gray-800 text-sm">ผลงาน: ${item.assignmentName}</p>
@@ -373,13 +401,13 @@ export default function SubmissionStatusView({
             <p>🏷️ สถานะ: <span class="font-bold ${item.status === 'ตรวจแล้ว' ? 'text-emerald-700' : 'text-amber-700'}">${item.status}</span> ${item.score !== null ? `(${item.score}/${item.maxScore} คะแนน)` : ''}</p>
           </div>
           <p class="text-rose-700 bg-rose-50 p-2.5 rounded-xl border border-rose-200 font-semibold">
-            ⚠️ คุณต้องการลบผลงานนี้ออกจากระบบใช่หรือไม่? ${isDup ? '(เพื่อลบรายการที่ส่งซ้ำออกให้เหลือชิ้นเดียว)' : '(สามารถส่งงานใหม่ได้ภายหลัง)'}
+            ⚠️ ระบบจะลบผลงานนี้ออกจากทั้งฐานข้อมูลและ Google Sheet อย่างถาวร ${isDup ? '(เพื่อลบรายการที่ส่งซ้ำออกให้เหลือชิ้นเดียว)' : '(สามารถส่งงานใหม่ได้ภายหลัง)'}
           </p>
         </div>
       `,
       icon: 'warning',
       showCancelButton: true,
-      confirmButtonText: '🗑️ ยืนยันการลบผลงาน',
+      confirmButtonText: '🗑️ ยืนยันการลบออกจากฐานข้อมูล',
       cancelButtonText: 'ยกเลิก',
       confirmButtonColor: '#EF4444',
       cancelButtonColor: '#6B7280',
@@ -391,15 +419,86 @@ export default function SubmissionStatusView({
     });
 
     if (result.isConfirmed) {
-      alertService.loading('กำลังลบงาน...', 'ระบบกำลังลบข้อมูลการส่งงานออกจากระบบ');
-      await storageService.deleteSubmission(item.id, sheetConfig);
-      await onRefreshData();
+      alertService.loading('กำลังลบงานออกจากฐานข้อมูล...', 'ระบบกำลังลบข้อมูลออกจากเครื่องและ Google Sheet อย่างถาวร');
+      await storageService.deleteSubmission(item, sheetConfig);
       if (onDataChange) onDataChange();
       alertService.close();
       if (viewingDetail?.id === item.id) {
         setViewingDetail(null);
       }
-      alertService.success('ลบข้อมูลเรียบร้อยแล้ว', `ลบผลงาน "${item.assignmentName}" เรียบร้อยแล้ว`);
+      alertService.success('ลบข้อมูลออกจากฐานข้อมูลเรียบร้อยแล้ว ✨', `ลบผลงาน "${item.assignmentName}" ของ ${item.studentName} ออกจากระบบและ Google Sheet เรียบร้อยแล้ว`);
+    }
+  };
+
+  // ลบงานที่ส่งซ้ำทั้งหมดอัตโนมัติ โดยเก็บผลงานชิ้นที่ดีที่สุด/ล่าสุดไว้ 1 ชิ้น
+  const handleDeleteAllOlderDuplicates = async () => {
+    if (duplicateSubmissions.length === 0) return;
+
+    // จัดกลุ่มตามนักเรียนและงาน เพื่อหาชิ้นงานเก่าที่ต้องลบ (เก็บชิ้นล่าสุดไว้)
+    const groups = new Map<string, Submission[]>();
+    filteredSubmissions.forEach(s => {
+      const cleanName = stripThaiPrefix(s.studentName).toLowerCase();
+      const cleanNum = String(s.studentNumber || '').trim();
+      const cleanGrade = normalizeGradeLevel(s.gradeLevel);
+      const cleanRoom = normalizeRoom(s.room);
+      const cleanAssign = (s.assignmentName || '').trim().toLowerCase();
+      const groupKey = `${cleanName}_${cleanNum}_${cleanGrade}_${cleanRoom}_${cleanAssign}`;
+      if (!groups.has(groupKey)) {
+        groups.set(groupKey, []);
+      }
+      groups.get(groupKey)!.push(s);
+    });
+
+    const itemsToDelete: Submission[] = [];
+    groups.forEach(list => {
+      if (list.length > 1) {
+        // เรียง: ถ้ามีตรวจแล้วให้เก็บไว้ก่อน ตามด้วยใหม่ไปเก่า
+        const sorted = [...list].sort((a, b) => {
+          if (a.score !== null && b.score === null) return -1;
+          if (b.score !== null && a.score === null) return 1;
+          return (b.id || '').localeCompare(a.id || '');
+        });
+        const olderDups = sorted.slice(1);
+        itemsToDelete.push(...olderDups);
+      }
+    });
+
+    if (itemsToDelete.length === 0) {
+      alertService.info('ไม่พบรายการส่งซ้ำที่ต้องลบ');
+      return;
+    }
+
+    const confirm = await Swal.fire({
+      title: '🗑️ ลบงานส่งซ้ำออกจากฐานข้อมูล?',
+      html: `
+        <div class="text-left text-xs space-y-2.5">
+          <p>ระบบตรวจพบรายการส่งงานซ้ำจำนวน <b>${itemsToDelete.length}</b> รายการ</p>
+          <div class="text-violet-700 bg-violet-50 p-3 rounded-xl border border-violet-200 space-y-1">
+            <p class="font-bold">💡 สิ่งที่ระบบจะดำเนินการ:</p>
+            <p>• <b>เก็บผลงานที่ดีที่สุด/ล่าสุดไว้ 1 ชิ้น</b> สำหรับแต่ละงาน</p>
+            <p>• ลบรายการส่งซ้ำชิ้นอื่นๆ ออกจากทั้งระบบและ Google Sheet ทันที</p>
+          </div>
+        </div>
+      `,
+      icon: 'warning',
+      showCancelButton: true,
+      confirmButtonText: `🗑️ ยืนยันลบ ${itemsToDelete.length} รายการ`,
+      cancelButtonText: 'ยกเลิก',
+      confirmButtonColor: '#EF4444',
+      cancelButtonColor: '#6B7280',
+      customClass: {
+        popup: 'rounded-3xl font-[\'Kanit\',sans-serif]',
+        confirmButton: 'px-4 py-2.5 rounded-xl text-xs font-bold',
+        cancelButton: 'px-4 py-2.5 rounded-xl text-xs font-bold',
+      }
+    });
+
+    if (confirm.isConfirmed) {
+      alertService.loading('กำลังลบงานที่ส่งซ้ำ...', `ระบบกำลังลบข้อมูล ${itemsToDelete.length} รายการออกจากฐานข้อมูล`);
+      await storageService.deleteMultipleSubmissions(itemsToDelete, sheetConfig);
+      if (onDataChange) onDataChange();
+      alertService.close();
+      alertService.success('ลบงานส่งซ้ำเรียบร้อยแล้ว ✨', `ลบรายการส่งซ้ำจำนวน ${itemsToDelete.length} รายการออกจากฐานข้อมูลเรียบร้อยแล้ว`);
     }
   };
 

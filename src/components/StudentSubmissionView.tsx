@@ -64,7 +64,7 @@ export default function StudentSubmissionView({
       .map((a) => a.academicYear?.trim())
       .filter((y): y is string => Boolean(y && y.length > 0));
 
-    let bestYear = '2567';
+    let bestYear = '2568';
     if (validYears.length > 0) {
       const sortedYears = [...new Set(validYears)].sort((a, b) => {
         const numA = parseInt(a, 10) || 0;
@@ -91,14 +91,14 @@ export default function StudentSubmissionView({
     return { latestYear: bestYear, latestSemester: bestSem };
   }, [assignments]);
 
-  // รวมรายการปีการศึกษาทั้งหมดที่มีในระบบ เพื่อให้เลือกได้ครบ
+  // รวมรายการปีการศึกษาล่าสุดที่มีในระบบ
   const availableYears = useMemo(() => {
     const set = new Set([
-      ...ACADEMIC_YEARS,
+      latestYear,
       ...assignments.map((a) => a.academicYear?.trim()).filter(Boolean) as string[],
     ]);
     return Array.from(set).sort((a, b) => (parseInt(b, 10) || 0) - (parseInt(a, 10) || 0));
-  }, [assignments]);
+  }, [assignments, latestYear]);
 
   // ค่าปีการศึกษาและภาคเรียน - นำปีและเทอมล่าสุดที่ครูสร้างไว้มาแสดงเป็นค่าเริ่มต้น
   const [academicYear, setAcademicYear] = useState<string>(() => latestYear);

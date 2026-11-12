@@ -15,6 +15,20 @@ dotenv.config();
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
+// Shared Gemini AI Client configured per Gemini API specifications
+function getGeminiClient(): GoogleGenAI | null {
+  const apiKey = process.env.GEMINI_API_KEY;
+  if (!apiKey) return null;
+  return new GoogleGenAI({
+    apiKey,
+    httpOptions: {
+      headers: {
+        'User-Agent': 'aistudio-build',
+      },
+    },
+  });
+}
+
 async function startServer() {
   const app = express();
 
@@ -36,7 +50,7 @@ async function startServer() {
 
   app.use(express.json({ limit: '10mb' }));
 
-  // AI Evaluation API endpoint
+  // 1. AI Evaluation API endpoint
   app.post('/api/ai-evaluate', async (req, res) => {
     try {
       const {
@@ -52,16 +66,15 @@ async function startServer() {
         studentNumber = '',
       } = req.body;
 
-      const apiKey = process.env.GEMINI_API_KEY;
+      const ai = getGeminiClient();
 
-      if (!apiKey) {
+      if (!ai) {
         return res.status(200).json({
           success: false,
-          error: 'No GEMINI_API_KEY provided on server, fallback will be used',
+          error: 'No GEMINI_API_KEY configured on server, fallback will be used',
         });
       }
 
-      const ai = new GoogleGenAI({});
       const prompt = `คุณคือผู้ช่วย AI ประเมินผลงานนักเรียนระดับมัธยมศึกษา (โรงเรียนท่าบ่อ สพม.หนองคาย) เพจ AI กับครูพอลล่า
 ช่วยคุณครูตรวจประเมินผลงานของนักเรียนอย่างละเอียดและสร้างสรรค์ โดยวิเคราะห์ตาม "ชนิดของงาน": ${workType}
 
@@ -106,7 +119,7 @@ async function startServer() {
       try {
         const parsed = JSON.parse(responseText);
         return res.json({ success: true, data: parsed });
-      } catch (e) {
+      } catch {
         return res.json({
           success: true,
           data: {
@@ -121,6 +134,65 @@ async function startServer() {
     } catch (err: any) {
       console.error('Server AI evaluation error:', err);
       return res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
+  // 2. Server-side Gemini generate content endpoint
+  app.post('/api/gemini/generate', async (req, res) => {
+    try {
+      const { prompt, model = 'gemini-3.8-flash', systemInstruction } = req.body;
+      const ai = getGeminiClient();
+
+      if (!ai) {
+        return res.status(500).json({ success: false, error: 'GEMINI_API_KEY is not set on the server' });
+      }
+
+      const response = await ai.models.generateContent({
+        model,
+        contents: prompt,
+        config: systemInstruction ? { systemInstruction } : undefined,
+      });
+
+      return res.json({ success: true, text: response.text });
+    } catch (err: any) {
+      console.error('Server Gemini generate error:', err);
+      return res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
+  // 3. Server-side Gemini streaming endpoint (Server-Sent Events)
+  app.post('/api/gemini/stream', async (req, res) => {
+    try {
+      const { prompt, model = 'gemini-3.8-flash', systemInstruction } = req.body;
+      const ai = getGeminiClient();
+
+      if (!ai) {
+        return res.status(500).json({ success: false, error: 'GEMINI_API_KEY is not set on the server' });
+      }
+
+      res.setHeader('Content-Type', 'text/event-stream');
+      res.setHeader('Cache-Control', 'no-cache');
+      res.setHeader('Connection', 'keep-alive');
+
+      const streamResponse = await ai.models.generateContentStream({
+        model,
+        contents: prompt,
+        config: systemInstruction ? { systemInstruction } : undefined,
+      });
+
+      for await (const chunk of streamResponse) {
+        const textChunk = chunk.text || '';
+        res.write(`data: ${JSON.stringify({ text: textChunk })}\n\n`);
+      }
+
+      res.write('data: [DONE]\n\n');
+      res.end();
+    } catch (err: any) {
+      console.error('Server Gemini stream error:', err);
+      if (!res.headersSent) {
+        return res.status(500).json({ success: false, error: err.message });
+      }
+      res.end();
     }
   });
 
