@@ -22,7 +22,7 @@ import StudentSubmissionView from './components/StudentSubmissionView';
 import SubmissionStatusView from './components/SubmissionStatusView';
 import TeacherPortalView from './components/TeacherPortalView';
 import AdminConfigView from './components/AdminConfigView';
-import { ActiveTab, Submission, Teacher, Assignment, GoogleSheetConfig } from './types';
+import { ActiveTab, Submission, Teacher, Assignment, GoogleSheetConfig, GradeLevel } from './types';
 import { FOOTER_CREDIT } from './constants';
 import { storageService } from './services/storageService';
 import { alertService } from './services/alertService';
@@ -37,6 +37,15 @@ export default function App() {
   const [isAdminAuthenticated, setIsAdminAuthenticated] = useState(false);
   const [isSyncing, setIsSyncing] = useState(false);
   const [statusSearchTerm, setStatusSearchTerm] = useState('');
+  const [prefilledAssignment, setPrefilledAssignment] = useState<{
+    teacherName?: string;
+    subjectCode?: string;
+    assignmentId?: string;
+    studentName?: string;
+    studentNumber?: string;
+    gradeLevel?: GradeLevel;
+    room?: string;
+  } | null>(null);
 
   // Initialize data from LocalStorage
   const refreshAllLocalData = () => {
@@ -116,9 +125,9 @@ export default function App() {
 
   return (
     <div 
-      className="min-h-screen w-full relative bg-cover bg-center bg-fixed font-['Kanit',sans-serif] text-gray-900 bg-neutral-950"
+      className="min-h-screen w-full relative bg-cover bg-center bg-fixed font-['Kanit',sans-serif] text-gray-900 bg-[#071330]"
       style={{
-        backgroundImage: `linear-gradient(135deg, rgba(10, 10, 12, 0.96) 0%, rgba(20, 20, 24, 0.93) 50%, rgba(6, 6, 8, 0.97) 100%), url('https://img1.pic.in.th/images/unnamed-3656f832b88724b5e7.png')`
+        backgroundImage: `linear-gradient(135deg, rgba(7, 19, 48, 0.96) 0%, rgba(11, 28, 68, 0.93) 50%, rgba(5, 14, 38, 0.97) 100%), url('https://img1.pic.in.th/images/unnamed-3656f832b88724b5e7.png')`
       }}
     >
       {/* Sidebar Navigation */}
@@ -194,16 +203,25 @@ export default function App() {
                 }
                 setActiveTab('status');
               }}
+              prefillAssignment={prefilledAssignment}
+              onClearPrefill={() => setPrefilledAssignment(null)}
             />
           )}
 
           {activeTab === 'status' && (
             <SubmissionStatusView
               submissions={submissions}
+              assignments={assignments}
+              teachers={teachers}
               sheetConfig={sheetConfig}
               onRefreshData={handleTriggerSync}
+              onDataChange={refreshAllLocalData}
               initialSearchTerm={statusSearchTerm}
               onClearInitialSearch={() => setStatusSearchTerm('')}
+              onNavigateToSubmit={(prefill) => {
+                setPrefilledAssignment(prefill);
+                setActiveTab('submit');
+              }}
             />
           )}
 
@@ -232,15 +250,15 @@ export default function App() {
         </main>
 
         {/* Bottom Footer (ส่วนท้าย) */}
-        <footer className="mt-auto py-5 px-6 border-t border-neutral-800/90 bg-neutral-900/90 backdrop-blur-md text-center shadow-lg shadow-black/60">
+        <footer className="mt-auto py-5 px-6 border-t border-blue-900/60 bg-[#071330]/95 backdrop-blur-md text-center shadow-lg shadow-blue-950/60">
           <div className="text-xs space-y-1">
-            <p className="font-semibold text-neutral-200 flex items-center justify-center gap-1">
+            <p className="font-semibold text-blue-100 flex items-center justify-center gap-1">
               <span>🌸</span> พัฒนาโดย ครูชมัยพร ถินสำราญ
             </p>
-            <p className="text-neutral-400 flex items-center justify-center gap-1">
+            <p className="text-blue-300/80 flex items-center justify-center gap-1">
               <span>🏫</span> โรงเรียนท่าบ่อ  สพม.หนองคาย
             </p>
-            <p className="text-amber-400 font-semibold flex items-center justify-center gap-1">
+            <p className="text-amber-300 font-semibold flex items-center justify-center gap-1">
               <span>💖</span> ติดตามเพจ AI กับครูพอลล่า
             </p>
           </div>

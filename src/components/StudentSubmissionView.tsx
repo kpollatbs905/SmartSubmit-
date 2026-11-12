@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { 
   Send, 
   ExternalLink, 
@@ -20,11 +20,14 @@ import {
   HelpCircle,
   Sparkles,
   Trash2,
-  AlertTriangle
+  AlertTriangle,
+  Calendar,
+  Users,
+  Check
 } from 'lucide-react';
 import Swal from 'sweetalert2';
 import { Submission, GradeLevel, Teacher, Assignment, GoogleSheetConfig } from '../types';
-import { GRADE_LEVELS, ROOMS } from '../constants';
+import { GRADE_LEVELS, ROOMS, ACADEMIC_YEARS, SEMESTERS } from '../constants';
 import { alertService } from '../services/alertService';
 import { storageService } from '../services/storageService';
 
@@ -34,6 +37,16 @@ interface Props {
   sheetConfig: GoogleSheetConfig;
   onSubmissionSuccess: () => void;
   onNavigateToStatus: (studentName?: string) => void;
+  prefillAssignment?: {
+    teacherName?: string;
+    subjectCode?: string;
+    assignmentId?: string;
+    studentName?: string;
+    studentNumber?: string;
+    gradeLevel?: GradeLevel;
+    room?: string;
+  } | null;
+  onClearPrefill?: () => void;
 }
 
 export default function StudentSubmissionView({
@@ -42,12 +55,70 @@ export default function StudentSubmissionView({
   sheetConfig,
   onSubmissionSuccess,
   onNavigateToStatus,
+  prefillAssignment,
+  onClearPrefill,
 }: Props) {
+  // คำนวณปีการศึกษาและภาคเรียนล่าสุดจากงานที่ครูสร้างไว้ในระบบ
+  const { latestYear, latestSemester } = useMemo(() => {
+    const validYears = assignments
+      .map((a) => a.academicYear?.trim())
+      .filter((y): y is string => Boolean(y && y.length > 0));
+
+    let bestYear = '2567';
+    if (validYears.length > 0) {
+      const sortedYears = [...new Set(validYears)].sort((a, b) => {
+        const numA = parseInt(a, 10) || 0;
+        const numB = parseInt(b, 10) || 0;
+        return numB - numA;
+      });
+      bestYear = sortedYears[0];
+    }
+
+    const validSemesters = assignments
+      .filter((a) => (!a.academicYear || a.academicYear.trim() === bestYear) && a.semester?.trim())
+      .map((a) => a.semester!.trim());
+
+    let bestSem = '1';
+    if (validSemesters.length > 0) {
+      const sortedSem = [...new Set(validSemesters)].sort((a, b) => {
+        const numA = parseInt(a, 10) || 0;
+        const numB = parseInt(b, 10) || 0;
+        return numB - numA;
+      });
+      bestSem = sortedSem[0];
+    }
+
+    return { latestYear: bestYear, latestSemester: bestSem };
+  }, [assignments]);
+
+  // รวมรายการปีการศึกษาทั้งหมดที่มีในระบบ เพื่อให้เลือกได้ครบ
+  const availableYears = useMemo(() => {
+    const set = new Set([
+      ...ACADEMIC_YEARS,
+      ...assignments.map((a) => a.academicYear?.trim()).filter(Boolean) as string[],
+    ]);
+    return Array.from(set).sort((a, b) => (parseInt(b, 10) || 0) - (parseInt(a, 10) || 0));
+  }, [assignments]);
+
+  // ค่าปีการศึกษาและภาคเรียน - นำปีและเทอมล่าสุดที่ครูสร้างไว้มาแสดงเป็นค่าเริ่มต้น
+  const [academicYear, setAcademicYear] = useState<string>(() => latestYear);
+  const [semester, setSemester] = useState<string>(() => latestSemester);
+  const userChangedAcademicYearRef = useRef<boolean>(false);
+
+  // อัปเดตปีและเทอมล่าสุดอัตโนมัติหากยังไม่ได้เลือกเองและไม่มีการส่ง prefillAssignment เข้ามา
+  useEffect(() => {
+    if (!prefillAssignment && !userChangedAcademicYearRef.current) {
+      setAcademicYear(latestYear);
+      setSemester(latestSemester);
+    }
+  }, [latestYear, latestSemester, prefillAssignment]);
+
   // Student persistent info
-  const [studentName, setStudentName] = useState('');
-  const [studentNumber, setStudentNumber] = useState('');
   const [gradeLevel, setGradeLevel] = useState<GradeLevel>('ม.1');
   const [room, setRoom] = useState('1');
+  const [studentName, setStudentName] = useState('');
+  const [studentNumber, setStudentNumber] = useState('');
+  const [selectedRosterStudentId, setSelectedRosterStudentId] = useState<string>('');
 
   // Work selection
   const [selectedTeacher, setSelectedTeacher] = useState('');
@@ -66,30 +137,127 @@ export default function StudentSubmissionView({
     return () => clearInterval(timer);
   }, []);
 
+  // When prefillAssignment is passed (e.g. from pending assignments tab)
+  useEffect(() => {
+    if (prefillAssignment) {
+      if (prefillAssignment.studentName) setStudentName(prefillAssignment.studentName);
+      if (prefillAssignment.studentNumber) setStudentNumber(prefillAssignment.studentNumber);
+      if (prefillAssignment.gradeLevel) setGradeLevel(prefillAssignment.gradeLevel);
+      if (prefillAssignment.room) setRoom(prefillAssignment.room);
+      if (prefillAssignment.teacherName) setSelectedTeacher(prefillAssignment.teacherName);
+      if (prefillAssignment.subjectCode) setSelectedSubject(prefillAssignment.subjectCode);
+      if (prefillAssignment.assignmentId) {
+        setSelectedAssignmentId(prefillAssignment.assignmentId);
+        const matchAssign = assignments.find(a => a.id === prefillAssignment.assignmentId);
+        if (matchAssign?.academicYear) setAcademicYear(matchAssign.academicYear);
+        if (matchAssign?.semester) setSemester(matchAssign.semester);
+      }
+    }
+  }, [prefillAssignment, assignments]);
+
+  // Query student names in the chosen classroom (from uploaded student roster + existing submissions)
+  const availableRoomStudents = React.useMemo(() => {
+    const rosterList = storageService.getStudentRoster();
+    const allSubs = storageService.getSubmissions();
+
+    const studentMap = new Map<string, { id: string; studentNumber: string; studentName: string; source: 'roster' | 'submission' }>();
+
+    // 1. First priority: from uploaded student roster
+    rosterList
+      .filter(r => r.gradeLevel === gradeLevel && r.room === room)
+      .forEach(r => {
+        const key = r.studentName.trim().toLowerCase();
+        if (!studentMap.has(key)) {
+          studentMap.set(key, {
+            id: r.id,
+            studentNumber: r.studentNumber,
+            studentName: r.studentName.trim(),
+            source: 'roster',
+          });
+        }
+      });
+
+    // 2. Second priority: from previous submissions in this grade & room
+    allSubs
+      .filter(s => s.gradeLevel === gradeLevel && s.room === room && s.studentName.trim())
+      .forEach(s => {
+        const key = s.studentName.trim().toLowerCase();
+        if (!studentMap.has(key)) {
+          studentMap.set(key, {
+            id: `SUB-${s.id}`,
+            studentNumber: s.studentNumber || '',
+            studentName: s.studentName.trim(),
+            source: 'submission',
+          });
+        }
+      });
+
+    // Sort by numeric studentNumber (1, 2, 3...) then by name
+    return Array.from(studentMap.values()).sort((a, b) => {
+      const numA = parseInt(a.studentNumber, 10);
+      const numB = parseInt(b.studentNumber, 10);
+      if (!isNaN(numA) && !isNaN(numB)) {
+        return numA - numB;
+      }
+      if (!isNaN(numA)) return -1;
+      if (!isNaN(numB)) return 1;
+      return a.studentName.localeCompare(b.studentName, 'th');
+    });
+  }, [gradeLevel, room]);
+
+  const handleSelectStudentFromRoster = (studentId: string) => {
+    setSelectedRosterStudentId(studentId);
+    if (!studentId) {
+      return;
+    }
+    const found = availableRoomStudents.find(s => s.id === studentId);
+    if (found) {
+      setStudentName(found.studentName);
+      if (found.studentNumber) {
+        setStudentNumber(found.studentNumber);
+      }
+    }
+  };
+
   // When teacher changes, filter subjects
   const availableTeachers = teachers.length > 0 ? teachers : [];
   
-  // Available subjects for selected teacher
+  // Available subjects for selected teacher, year, and semester
   const availableSubjects = React.useMemo(() => {
-    const list = assignments.filter(a => !selectedTeacher || a.teacherName === selectedTeacher);
+    const list = assignments.filter(a => {
+      const matchTeacher = !selectedTeacher || a.teacherName === selectedTeacher;
+      const matchYear = !a.academicYear || a.academicYear === academicYear;
+      const matchSemester = !a.semester || a.semester === semester;
+      return matchTeacher && matchYear && matchSemester;
+    });
+    const effectiveList = list.length > 0 ? list : assignments.filter(a => !selectedTeacher || a.teacherName === selectedTeacher);
     const uniqueMap = new Map<string, { code: string; name: string }>();
-    list.forEach(a => {
+    effectiveList.forEach(a => {
       const key = `${a.subjectCode}-${a.subjectName}`;
       if (!uniqueMap.has(key)) {
         uniqueMap.set(key, { code: a.subjectCode, name: a.subjectName });
       }
     });
     return Array.from(uniqueMap.values());
-  }, [assignments, selectedTeacher]);
+  }, [assignments, selectedTeacher, academicYear, semester]);
 
-  // Available assignments for selected subject
+  // Available assignments for selected subject, year, and semester
   const availableAssignments = React.useMemo(() => {
+    const strictList = assignments.filter(a => {
+      const matchTeacher = !selectedTeacher || a.teacherName === selectedTeacher;
+      const matchSubject = !selectedSubject || a.subjectCode === selectedSubject;
+      const matchYear = !a.academicYear || a.academicYear === academicYear;
+      const matchSemester = !a.semester || a.semester === semester;
+      return matchTeacher && matchSubject && matchYear && matchSemester;
+    });
+    if (strictList.length > 0) return strictList;
+
     return assignments.filter(a => {
       const matchTeacher = !selectedTeacher || a.teacherName === selectedTeacher;
       const matchSubject = !selectedSubject || a.subjectCode === selectedSubject;
       return matchTeacher && matchSubject;
     });
-  }, [assignments, selectedTeacher, selectedSubject]);
+  }, [assignments, selectedTeacher, selectedSubject, academicYear, semester]);
 
   const currentAssignment = assignments.find(a => a.id === selectedAssignmentId);
 
@@ -247,8 +415,8 @@ export default function StudentSubmissionView({
         maxScore: currentAssignment.maxScore,
         workType: currentAssignment.workType || 'ใบงาน/แบบฝึกหัด',
         sampleUrl: currentAssignment.sampleUrl,
-        academicYear: currentAssignment.academicYear || '2567',
-        semester: currentAssignment.semester || '1',
+        academicYear: academicYear || currentAssignment.academicYear || '2567',
+        semester: semester || currentAssignment.semester || '1',
         workUrl: workUrl.trim(),
         score: null,
         status: 'รอตรวจ',
@@ -319,36 +487,320 @@ export default function StudentSubmissionView({
         </div>
       </div>
 
-      {/* Main Form Box */}
+      {/* Quick Action / Prefill notification */}
+      {prefillAssignment && currentAssignment && (
+        <div className="bg-gradient-to-r from-amber-500 via-amber-600 to-yellow-600 text-white rounded-3xl p-5 shadow-xl shadow-amber-950/20 flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-2 border-amber-300 animate-in fade-in">
+          <div className="flex items-center gap-3">
+            <div className="w-11 h-11 rounded-2xl bg-white/20 backdrop-blur-xs flex items-center justify-center text-2xl shrink-0">
+              🚀
+            </div>
+            <div>
+              <div className="text-xs font-black uppercase tracking-wider text-amber-100 flex items-center gap-1.5">
+                <span>กำลังเลือกส่งงานที่ค้างส่ง</span>
+                <span className="px-2 py-0.5 rounded-full bg-white text-amber-900 text-[10px] font-extrabold">ระบบเลือกข้อมูลให้อัตโนมัติ</span>
+              </div>
+              <div className="text-base font-extrabold mt-0.5">
+                {currentAssignment.title}
+              </div>
+              <div className="text-xs text-amber-100 mt-0.5">
+                วิชา: {currentAssignment.subjectCode} {currentAssignment.subjectName} • ครูผู้สอน: {currentAssignment.teacherName} (คะแนนเต็ม {currentAssignment.maxScore} คะแนน)
+              </div>
+            </div>
+          </div>
+          {onClearPrefill && (
+            <button
+              type="button"
+              onClick={onClearPrefill}
+              className="px-4 py-2 bg-white/20 hover:bg-white/30 text-white rounded-xl text-xs font-bold border border-white/40 cursor-pointer transition-colors self-start sm:self-auto"
+            >
+              เลือกงานอื่นแทน ✕
+            </button>
+          )}
+        </div>
+      )}
+
+      {/* Button to check pending assignments & status */}
+      <div className="flex items-center justify-between flex-wrap gap-3 bg-white/80 backdrop-blur-md px-5 py-3 rounded-2xl border border-purple-100 shadow-sm">
+        <div className="flex items-center gap-2 text-xs text-gray-700">
+          <span className="text-base">💡</span>
+          <span>ต้องการตรวจสอบว่าส่งงานครบหรือยัง หรือมีวิชาไหนค้างส่งบ้าง?</span>
+        </div>
+        <button
+          type="button"
+          onClick={() => onNavigateToStatus(studentName || undefined)}
+          className="px-3.5 py-1.5 bg-gradient-to-r from-violet-600 to-indigo-600 hover:from-violet-700 hover:to-indigo-700 text-white rounded-xl text-xs font-bold shadow-xs cursor-pointer transition-all flex items-center gap-1.5"
+        >
+          <span>🔍 เช็คงานค้างส่ง & คะแนนของคุณ</span>
+          <span>→</span>
+        </button>
+      </div>
       <form onSubmit={handleSubmit} className="bg-white/95 backdrop-blur-md rounded-3xl p-6 md:p-8 shadow-xl shadow-purple-100/30 border border-purple-100/70 space-y-8">
-        {/* Section 1: ข้อมูลนักเรียน */}
+        {/* Section 1: ข้อมูลปีการศึกษา ระดับชั้น ห้อง และผู้ส่งงาน */}
         <div>
           <div className="flex items-center gap-2.5 pb-3 border-b border-purple-100/60 mb-6">
             <div className="w-8 h-8 rounded-xl bg-gradient-to-tr from-violet-400 to-indigo-500 text-white flex items-center justify-center font-bold text-sm shadow-xs">
               1
             </div>
-            <h2 className="text-lg font-bold text-gray-800 flex items-center gap-1.5">
-              <span>👤 ข้อมูลผู้ส่งงาน</span>
+            <h2 className="text-lg font-bold text-gray-800 flex items-center gap-2">
+              <span>📅 ข้อมูลปีการศึกษา ห้องเรียน และผู้ส่งงาน</span>
             </h2>
-            <span className="text-xs text-violet-600/80 font-medium ml-auto hidden sm:inline">
-              ✨ ข้อมูลจะถูกจดจำไว้สำหรับการส่งงานชิ้นถัดไป
+            <span className="text-xs text-indigo-700 font-semibold ml-auto hidden sm:inline bg-indigo-50 px-2.5 py-1 rounded-full border border-indigo-200">
+              ค่าเริ่มต้น: ปีการศึกษา {academicYear} ภาคเรียนที่ {semester}
             </span>
           </div>
 
+          {/* Grid 1: ปีการศึกษา ภาคเรียน ระดับชั้น และห้องเรียน */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+            {/* ปีการศึกษา */}
+            <div>
+              <label className="block text-xs font-bold text-gray-700 mb-1.5 flex items-center justify-between">
+                <span className="flex items-center gap-1.5">
+                  <Calendar size={14} className="text-indigo-600" />
+                  <span>ปีการศึกษา</span>
+                  <span className="text-pink-500 font-bold">*</span>
+                </span>
+                <span className="text-[10px] text-indigo-700 bg-indigo-50 px-2 py-0.5 rounded-full font-bold border border-indigo-100">
+                  ปี {academicYear}
+                </span>
+              </label>
+              <select
+                value={academicYear}
+                onChange={(e) => {
+                  userChangedAcademicYearRef.current = true;
+                  setAcademicYear(e.target.value);
+                }}
+                className="w-full px-3.5 py-2.5 rounded-xl border border-purple-200/80 bg-purple-50/20 focus:bg-white text-gray-800 text-sm font-semibold focus:outline-none focus:ring-2 focus:ring-purple-300 focus:border-purple-400 transition-all shadow-xs cursor-pointer"
+              >
+                {availableYears.map((y) => (
+                  <option key={y} value={y}>
+                    ปีการศึกษา {y}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            {/* ภาคเรียน */}
+            <div>
+              <label className="block text-xs font-bold text-gray-700 mb-1.5 flex items-center justify-between">
+                <span className="flex items-center gap-1.5">
+                  <span>📆</span>
+                  <span>ภาคเรียน</span>
+                  <span className="text-pink-500 font-bold">*</span>
+                </span>
+                <span className="text-[10px] text-indigo-700 bg-indigo-50 px-2 py-0.5 rounded-full font-bold border border-indigo-100">
+                  เทอม {semester}
+                </span>
+              </label>
+              <select
+                value={semester}
+                onChange={(e) => {
+                  userChangedAcademicYearRef.current = true;
+                  setSemester(e.target.value);
+                }}
+                className="w-full px-3.5 py-2.5 rounded-xl border border-purple-200/80 bg-purple-50/20 focus:bg-white text-gray-800 text-sm font-semibold focus:outline-none focus:ring-2 focus:ring-purple-300 focus:border-purple-400 transition-all shadow-xs cursor-pointer"
+              >
+                {SEMESTERS.map((s) => (
+                  <option key={s.value} value={s.value}>
+                    {s.label}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            {/* ชั้น ม.1 ถึง ม.6 */}
+            <div>
+              <label className="block text-xs font-bold text-gray-700 mb-1.5 flex items-center gap-1.5">
+                <GraduationCap size={14} className="text-indigo-600" />
+                <span>ระดับชั้น</span>
+                <span className="text-pink-500 font-bold">*</span>
+              </label>
+              <select
+                value={gradeLevel}
+                onChange={(e) => {
+                  setGradeLevel(e.target.value as GradeLevel);
+                  setSelectedRosterStudentId('');
+                }}
+                className="w-full px-3.5 py-2.5 rounded-xl border border-purple-200/80 bg-purple-50/20 focus:bg-white text-gray-800 text-sm font-semibold focus:outline-none focus:ring-2 focus:ring-purple-300 focus:border-purple-400 transition-all shadow-xs cursor-pointer"
+              >
+                {GRADE_LEVELS.map((g) => (
+                  <option key={g} value={g}>
+                    ชั้น {g} (มัธยมศึกษาปีที่ {g.replace('ม.', '')})
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            {/* ห้อง 1 ถึง 14 */}
+            <div>
+              <label className="block text-xs font-bold text-gray-700 mb-1.5 flex items-center justify-between">
+                <span className="flex items-center gap-1.5">
+                  <DoorClosed size={14} className="text-indigo-600" />
+                  <span>ห้องเรียน</span>
+                  <span className="text-pink-500 font-bold">*</span>
+                </span>
+                <span className="text-[10px] text-indigo-700 bg-indigo-50 px-1.5 py-0.5 rounded-full font-bold">
+                  ห้อง {gradeLevel}/{room}
+                </span>
+              </label>
+              <select
+                value={room}
+                onChange={(e) => {
+                  setRoom(e.target.value);
+                  setSelectedRosterStudentId('');
+                }}
+                className="w-full px-3.5 py-2.5 rounded-xl border border-purple-200/80 bg-purple-50/20 focus:bg-white text-gray-800 text-sm font-semibold focus:outline-none focus:ring-2 focus:ring-purple-300 focus:border-purple-400 transition-all shadow-xs cursor-pointer"
+              >
+                {ROOMS.map((r) => (
+                  <option key={r} value={r}>
+                    ห้อง {r} (ห้อง {gradeLevel}/{r})
+                  </option>
+                ))}
+              </select>
+            </div>
+          </div>
+
+          {/* กล่องแสดงรายชื่อนักเรียนในห้องที่เลือก (หากมีรายชื่อให้แสดงชื่อมาให้เลือกได้เลย) */}
+          <div className="mb-6">
+            {availableRoomStudents.length > 0 ? (
+              <div className="bg-gradient-to-r from-violet-50/90 via-indigo-50/90 to-purple-50/90 border-2 border-indigo-200/90 rounded-2xl p-4 md:p-5 shadow-sm space-y-3.5">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-indigo-100 pb-3">
+                  <div className="flex items-center gap-2.5">
+                    <div className="w-9 h-9 rounded-xl bg-gradient-to-tr from-violet-600 to-indigo-600 text-white flex items-center justify-center text-lg shadow-xs">
+                      📋
+                    </div>
+                    <div>
+                      <h3 className="text-sm font-bold text-indigo-950 flex items-center gap-2">
+                        <span>พบรายชื่อนักเรียนห้อง {gradeLevel}/{room} ในระบบ</span>
+                        <span className="px-2 py-0.5 rounded-full text-xs font-extrabold bg-indigo-600 text-white shadow-2xs">
+                          {availableRoomStudents.length} คน
+                        </span>
+                      </h3>
+                      <p className="text-xs text-indigo-700/90">
+                        ✨ คลิกเลือกชื่อของคุณได้ทันที ระบบจะใส่ชื่อ-นามสกุลและเลขที่ให้อัตโนมัติ
+                      </p>
+                    </div>
+                  </div>
+
+                  {studentName && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setStudentName('');
+                        setStudentNumber('');
+                        setSelectedRosterStudentId('');
+                      }}
+                      className="text-xs font-semibold text-rose-600 hover:text-rose-700 bg-rose-50 hover:bg-rose-100 px-2.5 py-1 rounded-lg border border-rose-200 transition-colors self-start sm:self-auto cursor-pointer"
+                    >
+                      ✕ ล้างชื่อที่เลือก / พิมพ์เอง
+                    </button>
+                  )}
+                </div>
+
+                {/* Dropdown เลือกชื่อนักเรียน */}
+                <div>
+                  <label className="block text-xs font-bold text-indigo-900 mb-1.5 flex items-center gap-1.5">
+                    <span>👇</span>
+                    <span>เลือกชื่อของคุณจากรายชื่อห้อง {gradeLevel}/{room} (เรียงตามลำดับเลขที่):</span>
+                  </label>
+                  <select
+                    value={selectedRosterStudentId}
+                    onChange={(e) => handleSelectStudentFromRoster(e.target.value)}
+                    className="w-full px-4 py-3 rounded-xl border-2 border-indigo-300 bg-white text-gray-900 text-sm font-semibold focus:outline-none focus:ring-2 focus:ring-indigo-400 shadow-xs cursor-pointer"
+                  >
+                    <option value="">
+                      -- คลิกเพื่อเลือกชื่อของคุณ ({availableRoomStudents.length} คน) หรือ พิมพ์ชื่อเองด้านล่าง --
+                    </option>
+                    {availableRoomStudents.map((st) => (
+                      <option key={st.id} value={st.id}>
+                        เลขที่ {st.studentNumber}: {st.studentName}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                {/* ปุ่มลัดเลือกชื่อนักเรียน (Quick Chips) */}
+                <div>
+                  <div className="text-[11px] font-bold text-indigo-900/80 mb-2 flex items-center justify-between">
+                    <span className="flex items-center gap-1">
+                      <span>⚡</span>
+                      <span>หรือแตะเลือกชื่อด่วน:</span>
+                    </span>
+                    <span className="text-[10px] text-gray-500 font-normal">
+                      (เลื่อนดูเพิ่มเติมได้)
+                    </span>
+                  </div>
+                  <div className="flex flex-wrap gap-1.5 max-h-36 overflow-y-auto p-1.5 bg-white/70 rounded-xl border border-indigo-100/80">
+                    {availableRoomStudents.map((st) => {
+                      const isSelected = studentName.trim() === st.studentName.trim() || selectedRosterStudentId === st.id;
+                      return (
+                        <button
+                          key={st.id}
+                          type="button"
+                          onClick={() => handleSelectStudentFromRoster(st.id)}
+                          className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all cursor-pointer flex items-center gap-1.5 ${
+                            isSelected
+                              ? 'bg-gradient-to-r from-violet-600 to-indigo-600 text-white shadow-sm ring-2 ring-indigo-300 font-bold scale-[1.02]'
+                              : 'bg-white hover:bg-indigo-50 text-gray-800 border border-indigo-100 hover:border-indigo-300 shadow-2xs'
+                          }`}
+                        >
+                          <span className="font-mono text-[10px] opacity-75">#{st.studentNumber}</span>
+                          <span>{st.studentName}</span>
+                          {isSelected && <Check size={12} className="text-amber-300" />}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              </div>
+            ) : (
+              <div className="bg-amber-50/80 border border-amber-200/90 rounded-2xl p-4 flex items-center gap-3 text-xs text-amber-900 shadow-2xs">
+                <span className="text-2xl shrink-0">ℹ️</span>
+                <div>
+                  <p className="font-bold text-amber-950">ยังไม่มีรายชื่อนักเรียนห้อง {gradeLevel}/{room} บันทึกไว้ในระบบ</p>
+                  <p className="text-amber-800 text-[11px] mt-0.5">
+                    คุณสามารถพิมพ์ชื่อ-นามสกุล และเลขที่ในช่องด้านล่างได้โดยตรง ระบบจะบันทึกข้อมูลเพื่อแสดงให้เลือกในครั้งต่อไป
+                  </p>
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* ช่องกรอกชื่อและเลขที่ (สามารถเลือกจากข้างบนหรือพิมพ์แก้ไขได้) */}
           <div className="grid grid-cols-1 md:grid-cols-12 gap-5">
             {/* ชื่อและนามสกุล */}
             <div className="md:col-span-8">
-              <label className="block text-sm font-medium text-gray-700 mb-1.5 flex items-center gap-1.5">
-                <span className="text-base">🧑‍🎓</span>
-                <span>ชื่อและนามสกุล ผู้ส่งงาน</span>
-                <span className="text-pink-500 font-bold">*</span>
+              <label className="block text-sm font-medium text-gray-700 mb-1.5 flex items-center justify-between">
+                <span className="flex items-center gap-1.5">
+                  <span className="text-base">🧑‍🎓</span>
+                  <span className="font-bold">ชื่อและนามสกุล ผู้ส่งงาน</span>
+                  <span className="text-pink-500 font-bold">*</span>
+                </span>
+                {studentName && availableRoomStudents.some(s => s.studentName.trim() === studentName.trim()) && (
+                  <span className="text-[11px] font-bold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-full border border-emerald-200 flex items-center gap-1">
+                    <Check size={11} />
+                    <span>เลือกจากรายชื่อห้อง {gradeLevel}/{room}</span>
+                  </span>
+                )}
               </label>
               <input
                 type="text"
                 required
                 value={studentName}
-                onChange={(e) => setStudentName(e.target.value)}
-                placeholder="เช่น ด.ช. ภูริพัฒน์ วงศ์สว่าง"
+                onChange={(e) => {
+                  setStudentName(e.target.value);
+                  const matched = availableRoomStudents.find(
+                    s => s.studentName.trim().toLowerCase() === e.target.value.trim().toLowerCase()
+                  );
+                  if (matched) {
+                    setSelectedRosterStudentId(matched.id);
+                    if (!studentNumber && matched.studentNumber) {
+                      setStudentNumber(matched.studentNumber);
+                    }
+                  } else {
+                    setSelectedRosterStudentId('');
+                  }
+                }}
+                placeholder="เช่น ด.ช. ภูริพัฒน์ วงศ์สว่าง (หรือเลือกจากรายชื่อด้านบน)"
                 className="w-full px-4 py-3 rounded-xl border border-purple-200/70 bg-purple-50/20 focus:bg-white text-gray-800 text-sm focus:outline-none focus:ring-2 focus:ring-purple-300 focus:border-purple-400 transition-all shadow-xs"
               />
             </div>
@@ -357,7 +809,7 @@ export default function StudentSubmissionView({
             <div className="md:col-span-4">
               <label className="block text-sm font-medium text-gray-700 mb-1.5 flex items-center gap-1.5">
                 <span className="text-base">🔢</span>
-                <span>เลขที่</span>
+                <span className="font-bold">เลขที่</span>
                 <span className="text-pink-500 font-bold">*</span>
               </label>
               <input
@@ -370,46 +822,6 @@ export default function StudentSubmissionView({
                 placeholder="เช่น 1"
                 className="w-full px-4 py-3 rounded-xl border border-purple-200/70 bg-purple-50/20 focus:bg-white text-gray-800 text-sm focus:outline-none focus:ring-2 focus:ring-purple-300 focus:border-purple-400 transition-all shadow-xs"
               />
-            </div>
-
-            {/* ชั้น ม.1 ถึง ม.6 */}
-            <div className="md:col-span-6">
-              <label className="block text-sm font-medium text-gray-700 mb-1.5 flex items-center gap-1.5">
-                <span className="text-base">🎓</span>
-                <span>ระดับชั้น (ม.1 ถึง ม.6)</span>
-                <span className="text-pink-500 font-bold">*</span>
-              </label>
-              <select
-                value={gradeLevel}
-                onChange={(e) => setGradeLevel(e.target.value as GradeLevel)}
-                className="w-full px-4 py-3 rounded-xl border border-purple-200/70 bg-purple-50/20 focus:bg-white text-gray-800 text-sm focus:outline-none focus:ring-2 focus:ring-purple-300 focus:border-purple-400 transition-all shadow-xs cursor-pointer"
-              >
-                {GRADE_LEVELS.map((g) => (
-                  <option key={g} value={g}>
-                    ชั้นมัธยมศึกษาปีที่ {g.replace('ม.', '')} ({g})
-                  </option>
-                ))}
-              </select>
-            </div>
-
-            {/* ห้อง 1 ถึง 14 */}
-            <div className="md:col-span-6">
-              <label className="block text-sm font-medium text-gray-700 mb-1.5 flex items-center gap-1.5">
-                <span className="text-base">🚪</span>
-                <span>ห้องเรียน (ห้อง 1 ถึง 14)</span>
-                <span className="text-pink-500 font-bold">*</span>
-              </label>
-              <select
-                value={room}
-                onChange={(e) => setRoom(e.target.value)}
-                className="w-full px-4 py-3 rounded-xl border border-purple-200/70 bg-purple-50/20 focus:bg-white text-gray-800 text-sm focus:outline-none focus:ring-2 focus:ring-purple-300 focus:border-purple-400 transition-all shadow-xs cursor-pointer"
-              >
-                {ROOMS.map((r) => (
-                  <option key={r} value={r}>
-                    ห้อง {r} (ห้อง {gradeLevel}/{r})
-                  </option>
-                ))}
-              </select>
             </div>
           </div>
         </div>

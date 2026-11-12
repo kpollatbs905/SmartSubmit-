@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { Submission, Teacher, Assignment, Subject, GoogleSheetConfig, GradeLevel } from '../types';
+import { Submission, Teacher, Assignment, Subject, GoogleSheetConfig, GradeLevel, StudentRosterItem } from '../types';
 import { INITIAL_SUBMISSIONS, INITIAL_TEACHERS, INITIAL_ASSIGNMENTS, INITIAL_SUBJECTS, DEFAULT_SHEET_CONFIG } from '../constants';
 import * as XLSX from 'xlsx';
 
@@ -14,36 +14,93 @@ const STORAGE_KEYS = {
   SUBJECTS: 'tha_bo_subjects_v2',
   SHEET_CONFIG: 'tha_bo_sheet_config_v2',
   ACTIVE_TEACHER: 'tha_bo_active_teacher_v2',
+  STUDENT_ROSTER: 'tha_bo_student_roster_v2',
+};
+
+export const normalizeRoom = (val: any): string => {
+  if (val === undefined || val === null) return '';
+  let s = String(val).trim();
+  if (!s) return '';
+  // If formatted like "1/2" or "ม.1/2" or "ม. 1/2", the room number is after the slash
+  if (s.includes('/')) {
+    const parts = s.split('/');
+    s = parts[parts.length - 1].trim();
+  }
+  // Strip any Thai words like "ห้อง" or non-digit chars
+  const digits = s.replace(/[^0-9]/g, '');
+  if (!digits) return s;
+  // Remove leading zeros: "01" -> "1", "02" -> "2"
+  const parsed = parseInt(digits, 10);
+  return isNaN(parsed) ? s : String(parsed);
+};
+
+export const normalizeGradeLevel = (val: any): GradeLevel | undefined => {
+  if (!val) return undefined;
+  const s = String(val).trim();
+  if (/ม\.?\s*1|m\.?\s*1|^1$|^1\//i.test(s)) return 'ม.1';
+  if (/ม\.?\s*2|m\.?\s*2|^2$|^2\//i.test(s)) return 'ม.2';
+  if (/ม\.?\s*3|m\.?\s*3|^3$|^3\//i.test(s)) return 'ม.3';
+  if (/ม\.?\s*4|m\.?\s*4|^4$|^4\//i.test(s)) return 'ม.4';
+  if (/ม\.?\s*5|m\.?\s*5|^5$|^5\//i.test(s)) return 'ม.5';
+  if (/ม\.?\s*6|m\.?\s*6|^6$|^6\//i.test(s)) return 'ม.6';
+  return undefined;
 };
 
 export const storageService = {
+  // Helper to check if a submission is a demo/sample record
+  isSampleSubmission(sub: Submission): boolean {
+    if (!sub) return false;
+    const isSampleId = sub.id?.startsWith('SUB-20240520-') || sub.id?.startsWith('SUB-SAMPLE-');
+    const isSampleUrl = Boolean(sub.workUrl && (
+      sub.workUrl.includes('example1') || 
+      sub.workUrl.includes('example2') || 
+      sub.workUrl.includes('example3') || 
+      sub.workUrl.includes('example4')
+    ));
+    const isSampleName = [
+      'ด.ช. ภูริพัฒน์ วงศ์สว่าง',
+      'ด.ญ. กานต์พิชชา รัตนดิลก',
+      'ด.ช. อนันต์ ธนะรัตน์',
+      'ด.ญ. ชนัญชิดา แสงทอง',
+      'ด.ช. ภาณุวิชญ์ สุวรรณโชติ',
+      'ด.ญ. พิมพ์มาดา เลิศปัญญา'
+    ].includes(sub.studentName?.trim());
+
+    return Boolean(isSampleId || (isSampleUrl && isSampleName));
+  },
+
+  // เคลียร์ข้อมูลนักเรียนตัวอย่างทั้งหมดออกจากระบบ
+  clearAllSampleData(): { removedCount: number } {
+    try {
+      const data = localStorage.getItem(STORAGE_KEYS.SUBMISSIONS);
+      if (!data) return { removedCount: 0 };
+      const list: Submission[] = JSON.parse(data);
+      const cleaned = list.filter(s => !this.isSampleSubmission(s));
+      const removedCount = list.length - cleaned.length;
+      this.saveSubmissions(cleaned);
+      return { removedCount };
+    } catch {
+      return { removedCount: 0 };
+    }
+  },
+
   // --- SUBMISSIONS ---
   getSubmissions(): Submission[] {
     try {
       const data = localStorage.getItem(STORAGE_KEYS.SUBMISSIONS);
       if (!data) {
-        localStorage.setItem(STORAGE_KEYS.SUBMISSIONS, JSON.stringify(INITIAL_SUBMISSIONS));
-        return INITIAL_SUBMISSIONS;
+        localStorage.setItem(STORAGE_KEYS.SUBMISSIONS, JSON.stringify([]));
+        return [];
       }
       const list: Submission[] = JSON.parse(data);
-      let updated = false;
-      // Merge sample records that may be missing
-      INITIAL_SUBMISSIONS.forEach(initSub => {
-        const existing = list.find(s => s.id === initSub.id);
-        if (!existing) {
-          list.push(initSub);
-          updated = true;
-        } else if (!existing.aiEvaluation && initSub.aiEvaluation) {
-          existing.aiEvaluation = initSub.aiEvaluation;
-          updated = true;
-        }
-      });
-      if (updated) {
-        this.saveSubmissions(list);
+      // Automatically clean out any old sample mock student records
+      const cleaned = list.filter(s => !this.isSampleSubmission(s));
+      if (cleaned.length !== list.length) {
+        this.saveSubmissions(cleaned);
       }
-      return list;
+      return cleaned;
     } catch {
-      return INITIAL_SUBMISSIONS;
+      return [];
     }
   },
 
@@ -884,6 +941,47 @@ export const storageService = {
     XLSX.writeFile(workbook, `${filename}_${new Date().toISOString().slice(0, 10)}.xlsx`);
   },
 
+  exportMissingStudentsToExcel(
+    missingList: Array<{
+      studentNumber: string;
+      studentName: string;
+      gradeLevel: string;
+      room: string;
+      assignmentName?: string;
+      subjectCode?: string;
+      subjectName?: string;
+    }>,
+    filename = 'รายชื่อนักเรียนค้างส่งงาน_โรงเรียนท่าบ่อ'
+  ) {
+    const data = missingList.map((item, index) => ({
+      'ลำดับ': index + 1,
+      'เลขที่': item.studentNumber,
+      'ชื่อ-นามสกุล': item.studentName,
+      'ระดับชั้น': item.gradeLevel,
+      'ห้อง': item.room,
+      'วิชา': item.subjectCode ? `${item.subjectCode} ${item.subjectName || ''}`.trim() : '-',
+      'งานที่ค้างส่ง': item.assignmentName || 'งานที่มอบหมาย',
+      'สถานะ': 'ยังไม่ส่งงาน (ค้างส่ง)',
+    }));
+
+    const worksheet = XLSX.utils.json_to_sheet(data);
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, worksheet, 'รายชื่อคนค้างส่ง');
+
+    worksheet['!cols'] = [
+      { wch: 6 },  // ลำดับ
+      { wch: 8 },  // เลขที่
+      { wch: 25 }, // ชื่อ-นามสกุล
+      { wch: 10 }, // ระดับชั้น
+      { wch: 8 },  // ห้อง
+      { wch: 20 }, // วิชา
+      { wch: 30 }, // งานที่ค้างส่ง
+      { wch: 22 }, // สถานะ
+    ];
+
+    XLSX.writeFile(workbook, `${filename}_${new Date().toISOString().slice(0, 10)}.xlsx`);
+  },
+
   // --- EXPORT TO PDF (Printable Formatted HTML Window with full Thai fonts & proper styling) ---
   exportToPdf(submissions: Submission[], title = 'รายงานผลการส่งงานและคะแนนนักเรียน', filterSummary = '') {
     const printWindow = window.open('', '_blank');
@@ -1004,6 +1102,350 @@ export const storageService = {
 
     printWindow.document.open();
     printWindow.document.write(htmlContent);
-    printWindow.document.close();
+  },
+
+  // --- STUDENT ROSTER MANAGEMENT & EXCEL IMPORT ---
+  getStudentRoster(): StudentRosterItem[] {
+    try {
+      const data = localStorage.getItem(STORAGE_KEYS.STUDENT_ROSTER);
+      if (!data) return [];
+      const parsed = JSON.parse(data);
+      if (!Array.isArray(parsed)) return [];
+      return parsed.map((item: any) => ({
+        ...item,
+        room: normalizeRoom(item.room) || item.room,
+        studentNumber: String(item.studentNumber || '').trim(),
+      }));
+    } catch {
+      return [];
+    }
+  },
+
+  saveStudentRoster(roster: StudentRosterItem[]) {
+    const normalized = (roster || []).map(item => ({
+      ...item,
+      room: normalizeRoom(item.room) || item.room,
+      studentNumber: String(item.studentNumber || '').trim(),
+    }));
+    localStorage.setItem(STORAGE_KEYS.STUDENT_ROSTER, JSON.stringify(normalized));
+  },
+
+  deleteStudentFromRoster(rosterId: string) {
+    const list = this.getStudentRoster();
+    const filtered = list.filter(r => r.id !== rosterId);
+    this.saveStudentRoster(filtered);
+  },
+
+  updateStudentInRoster(rosterId: string, updates: Partial<StudentRosterItem>) {
+    const list = this.getStudentRoster();
+    const updated = list.map(r => r.id === rosterId ? { ...r, ...updates } : r);
+    this.saveStudentRoster(updated);
+  },
+
+  deleteMultipleStudentsFromRoster(rosterIds: string[]) {
+    const list = this.getStudentRoster();
+    const filtered = list.filter(r => !rosterIds.includes(r.id));
+    this.saveStudentRoster(filtered);
+  },
+
+  deleteRosterByRoom(gradeLevel: string, room: string, academicYear?: string, semester?: string) {
+    const list = this.getStudentRoster();
+    const filtered = list.filter(r => {
+      const matchGrade = r.gradeLevel === gradeLevel;
+      const matchRoom = r.room === room;
+      const matchYear = !academicYear || academicYear === 'ALL' || r.academicYear === academicYear;
+      const matchSem = !semester || semester === 'ALL' || r.semester === semester;
+      return !(matchGrade && matchRoom && matchYear && matchSem);
+    });
+    this.saveStudentRoster(filtered);
+  },
+
+  // ดาวน์โหลดไฟล์แม่แบบ Excel สำหรับอัปโหลดรายชื่อนักเรียน
+  downloadStudentRosterTemplate(gradeLevel = 'ม.1', room = '1') {
+    const templateData = [
+      {
+        'เลขที่': 1,
+        'ชื่อ-นามสกุล': 'ด.ช. ภูริพัฒน์ วงศ์สว่าง',
+        'ระดับชั้น': gradeLevel,
+        'ห้อง': room,
+        'ปีการศึกษา': '2567',
+        'ภาคเรียน': '1',
+      },
+      {
+        'เลขที่': 2,
+        'ชื่อ-นามสกุล': 'ด.ช. กิตติศักดิ์ เจริญพร',
+        'ระดับชั้น': gradeLevel,
+        'ห้อง': room,
+        'ปีการศึกษา': '2567',
+        'ภาคเรียน': '1',
+      },
+      {
+        'เลขที่': 3,
+        'ชื่อ-นามสกุล': 'ด.ญ. กัญญารัตน์ มณีฉาย',
+        'ระดับชั้น': gradeLevel,
+        'ห้อง': room,
+        'ปีการศึกษา': '2567',
+        'ภาคเรียน': '1',
+      },
+      {
+        'เลขที่': 4,
+        'ชื่อ-นามสกุล': 'ด.ญ. ณัฐธิดา สุขเกษม',
+        'ระดับชั้น': gradeLevel,
+        'ห้อง': room,
+        'ปีการศึกษา': '2567',
+        'ภาคเรียน': '1',
+      },
+      {
+        'เลขที่': 5,
+        'ชื่อ-นามสกุล': 'ด.ช. ธนกฤต ศรีบุญเรือง',
+        'ระดับชั้น': gradeLevel,
+        'ห้อง': room,
+        'ปีการศึกษา': '2567',
+        'ภาคเรียน': '1',
+      },
+    ];
+
+    const worksheet = XLSX.utils.json_to_sheet(templateData);
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, worksheet, `รายชื่อ_${gradeLevel}_ห้อง${room}`);
+
+    worksheet['!cols'] = [
+      { wch: 8 },  // เลขที่
+      { wch: 28 }, // ชื่อ-นามสกุล
+      { wch: 12 }, // ระดับชั้น
+      { wch: 8 },  // ห้อง
+      { wch: 12 }, // ปีการศึกษา
+      { wch: 10 }, // ภาคเรียน
+    ];
+
+    XLSX.writeFile(workbook, `แม่แบบรายชื่อนักเรียน_${gradeLevel}_ห้อง${room}.xlsx`);
+  },
+
+  // แยกวิเคราะห์ไฟล์ Excel ที่อัปโหลดเข้ามา
+  parseStudentRosterExcel(fileBuffer: ArrayBuffer): {
+    success: boolean;
+    data?: Array<{
+      studentNumber: string;
+      studentName: string;
+      gradeLevel?: GradeLevel;
+      room?: string;
+      academicYear?: string;
+      semester?: string;
+    }>;
+    error?: string;
+  } {
+    try {
+      const workbook = XLSX.read(fileBuffer, { type: 'array' });
+      if (!workbook.SheetNames || workbook.SheetNames.length === 0) {
+        return { success: false, error: 'ไม่พบชีตข้อมูลในไฟล์ Excel' };
+      }
+
+      const firstSheetName = workbook.SheetNames[0];
+      const worksheet = workbook.Sheets[firstSheetName];
+      const rows: any[] = XLSX.utils.sheet_to_json(worksheet, { defval: '' });
+
+      if (!rows || rows.length === 0) {
+        return { success: false, error: 'ไฟล์ Excel ไม่มีข้อมูลนักเรียน' };
+      }
+
+      const parsedStudents: Array<{
+        studentNumber: string;
+        studentName: string;
+        gradeLevel?: GradeLevel;
+        room?: string;
+        academicYear?: string;
+        semester?: string;
+      }> = [];
+
+      for (let i = 0; i < rows.length; i++) {
+        const row = rows[i];
+        // หาฟิลด์ชื่อนักเรียน
+        const nameKey = Object.keys(row).find(k => 
+          /ชื่อ.*นามสกุล|ชื่อ.*สกุล|ชื่อ|name|fullname|นักเรียน/i.test(k.trim()) && !/ครู|ผู้สอน/i.test(k.trim())
+        );
+        const rawName = nameKey ? String(row[nameKey]).trim() : '';
+
+        // ถ้าไม่มีชื่อ ให้ข้ามบรรทัดนี้ไป
+        if (!rawName) continue;
+
+        // หาฟิลด์เลขที่
+        const noKey = Object.keys(row).find(k => 
+          /เลขที่|no|number|ที่|ลำดับ/i.test(k.trim())
+        );
+        const rawNo = noKey ? String(row[noKey]).trim() : String(parsedStudents.length + 1);
+
+        // หาฟิลด์ระดับชั้น
+        const gradeKey = Object.keys(row).find(k => 
+          /ระดับชั้น|ชั้น|grade|class|level/i.test(k.trim())
+        );
+        let rawGrade: GradeLevel | undefined = gradeKey && row[gradeKey] ? normalizeGradeLevel(row[gradeKey]) : undefined;
+
+        // หาฟิลด์ห้อง
+        const roomKey = Object.keys(row).find(k => 
+          /ห้องเรียน|ห้อง|room/i.test(k.trim())
+        );
+        const rawRoom = roomKey && row[roomKey] ? normalizeRoom(row[roomKey]) : undefined;
+
+        // ถ้ายังไม่ได้ระดับชั้น แต่ฟิลด์ห้องระบุเป็น "1/2" หรือ "ม.1/2" ให้นำระดับชั้นจากฟิลด์ห้องมาใช้
+        if (!rawGrade && roomKey && row[roomKey]) {
+          rawGrade = normalizeGradeLevel(row[roomKey]);
+        }
+
+        // หาฟิลด์ปีการศึกษา
+        const yearKey = Object.keys(row).find(k => 
+          /ปีการศึกษา|ปี|year/i.test(k.trim())
+        );
+        const rawYear = yearKey && row[yearKey] ? String(row[yearKey]).trim() : undefined;
+
+        // หาฟิลด์ภาคเรียน
+        const semKey = Object.keys(row).find(k => 
+          /ภาคเรียน|เทอม|semester|term/i.test(k.trim())
+        );
+        const rawSem = semKey && row[semKey] ? String(row[semKey]).trim() : undefined;
+
+        parsedStudents.push({
+          studentNumber: rawNo || String(parsedStudents.length + 1),
+          studentName: rawName,
+          gradeLevel: rawGrade,
+          room: rawRoom,
+          academicYear: rawYear,
+          semester: rawSem,
+        });
+      }
+
+      if (parsedStudents.length === 0) {
+        return { success: false, error: 'ไม่พบข้อมูลคอลัมน์ชื่อนักเรียนในไฟล์ Excel กรุณาตรวจสอบหัวตาราง' };
+      }
+
+      return { success: true, data: parsedStudents };
+    } catch (err: any) {
+      return { success: false, error: err?.message || 'เกิดข้อผิดพลาดในการอ่านไฟล์ Excel' };
+    }
+  },
+
+  // บันทึกนำเข้ารายชื่อนักเรียนลงระบบ
+  async importStudentsToRoster(
+    students: Array<{
+      studentNumber: string;
+      studentName: string;
+      gradeLevel: GradeLevel;
+      room: string;
+      academicYear: string;
+      semester: string;
+    }>,
+    options: {
+      teacherName?: string;
+      targetAssignment?: Assignment;
+      createSubmissions?: boolean;
+      config?: GoogleSheetConfig;
+    }
+  ): Promise<{ success: boolean; count: number; message: string }> {
+    if (!students || students.length === 0) {
+      return { success: false, count: 0, message: 'ไม่มีข้อมูลนักเรียนที่จะนำเข้า' };
+    }
+
+    const currentRoster = this.getStudentRoster();
+    const importedAt = new Date().toLocaleString('th-TH');
+
+    // อัปเดต Roster ของห้อง
+    const newRosterItems: StudentRosterItem[] = students.map((s, idx) => ({
+      id: `ROSTER-${Date.now()}-${idx}-${Math.random().toString(36).slice(2, 6)}`,
+      studentNumber: s.studentNumber,
+      studentName: s.studentName,
+      gradeLevel: s.gradeLevel,
+      room: s.room,
+      academicYear: s.academicYear,
+      semester: s.semester,
+      importedAt,
+      importedBy: options.teacherName || 'ครูผู้สอน',
+    }));
+
+    // รวมรายชื่อ
+    const combinedRoster = [...currentRoster];
+    newRosterItems.forEach(item => {
+      const existingIdx = combinedRoster.findIndex(r => 
+        r.studentName.toLowerCase() === item.studentName.toLowerCase() &&
+        r.gradeLevel === item.gradeLevel &&
+        r.room === item.room
+      );
+      if (existingIdx !== -1) {
+        combinedRoster[existingIdx] = item;
+      } else {
+        combinedRoster.push(item);
+      }
+    });
+    this.saveStudentRoster(combinedRoster);
+
+    // หากเลือกสร้างรายการส่งงาน/ติดตามผลงานสำหรับใบงานที่เลือก
+    let createdSubmissionsCount = 0;
+    if (options.createSubmissions && options.targetAssignment) {
+      const assignment = options.targetAssignment;
+      const currentSubmissions = this.getSubmissions();
+
+      students.forEach((s) => {
+        // เช็คว่ามีรายการส่งงานนี้อยู่แล้วหรือไม่
+        const exists = currentSubmissions.some(sub => 
+          sub.assignmentId === assignment.id &&
+          sub.studentName.toLowerCase() === s.studentName.toLowerCase() &&
+          sub.gradeLevel === s.gradeLevel &&
+          sub.room === s.room
+        );
+
+        if (!exists) {
+          const newSub: Submission = {
+            id: `SUB-IMP-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+            studentName: s.studentName,
+            studentNumber: s.studentNumber,
+            gradeLevel: s.gradeLevel,
+            room: s.room,
+            submittedAt: importedAt,
+            teacherName: assignment.teacherName,
+            subjectCode: assignment.subjectCode,
+            subjectName: assignment.subjectName,
+            assignmentId: assignment.id,
+            assignmentName: assignment.title,
+            maxScore: assignment.maxScore,
+            workType: assignment.workType || 'ใบงาน/แบบฝึกหัด',
+            sampleUrl: assignment.sampleUrl,
+            academicYear: s.academicYear || assignment.academicYear || '2567',
+            semester: s.semester || assignment.semester || '1',
+            workUrl: '',
+            score: null,
+            status: 'รอตรวจ',
+          };
+          currentSubmissions.push(newSub);
+          createdSubmissionsCount++;
+        }
+      });
+
+      this.saveSubmissions(currentSubmissions);
+
+      // ซิงค์ไปยัง Google Sheet ถ้ามี scriptUrl
+      if (options.config?.scriptUrl) {
+        try {
+          await fetch(options.config.scriptUrl, {
+            method: 'POST',
+            mode: 'no-cors',
+            headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+            body: JSON.stringify({
+              action: 'batchImportStudents',
+              students,
+              assignmentId: assignment.id,
+              teacherName: options.teacherName,
+            }),
+          });
+        } catch (err) {
+          console.warn('Sync import to Google Sheet err:', err);
+        }
+      }
+    }
+
+    return {
+      success: true,
+      count: students.length,
+      message: options.createSubmissions && options.targetAssignment
+        ? `นำเข้ารายชื่อนักเรียนสำเร็จ ${students.length} คน พร้อมสร้างรายการติดตามงานสำหรับ "${options.targetAssignment.title}" (${createdSubmissionsCount} รายการใหม่) 🎉`
+        : `บันทึกนำเข้ารายชื่อนักเรียนจำนวน ${students.length} คน เข้าสู่ระบบเรียบร้อยแล้ว ✨`,
+    };
   }
 };

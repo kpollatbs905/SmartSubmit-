@@ -17,7 +17,22 @@ const __dirname = path.dirname(__filename);
 
 async function startServer() {
   const app = express();
-  const PORT = Number(process.env.PORT) || 3000;
+
+  let portFromArg: number | undefined;
+  const portIdx = process.argv.indexOf('--port');
+  if (portIdx !== -1 && process.argv[portIdx + 1]) {
+    const p = parseInt(process.argv[portIdx + 1], 10);
+    if (!isNaN(p)) portFromArg = p;
+  }
+
+  let hostFromArg: string | undefined;
+  const hostIdx = process.argv.indexOf('--host');
+  if (hostIdx !== -1 && process.argv[hostIdx + 1]) {
+    hostFromArg = process.argv[hostIdx + 1];
+  }
+
+  const PORT = Number(process.env.PORT) || portFromArg || 3000;
+  const HOST = process.env.HOST || hostFromArg || '0.0.0.0';
 
   app.use(express.json({ limit: '10mb' }));
 
@@ -123,9 +138,19 @@ async function startServer() {
     app.use(vite.middlewares);
   }
 
-  app.listen(PORT, '0.0.0.0', () => {
-    console.log(`Server running at http://0.0.0.0:${PORT}`);
+  const server = app.listen(PORT, HOST, () => {
+    console.log(`Server running at http://${HOST}:${PORT}`);
+    console.log(`Ready on port ${PORT}`);
   });
+
+  const shutdown = () => {
+    server.close(() => {
+      process.exit(0);
+    });
+  };
+
+  process.on('SIGTERM', shutdown);
+  process.on('SIGINT', shutdown);
 }
 
 startServer();

@@ -92,4 +92,16 @@ export interface GoogleSheetConfig {
   lastSyncedAt?: string;
 }
 
+export interface StudentRosterItem {
+  id: string;
+  studentNumber: string;
+  studentName: string;
+  gradeLevel: GradeLevel;
+  room: string;
+  academicYear: string;
+  semester: string;
+  importedAt: string;
+  importedBy?: string;
+}
+
 export type ActiveTab = 'submit' | 'status' | 'teacher' | 'admin';

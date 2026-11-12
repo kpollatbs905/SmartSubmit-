@@ -58,7 +58,7 @@ export default function NavigationSidebar({
       id: 'status' as ActiveTab,
       label: '2. ตรวจสอบสถานะการส่งงาน',
       emoji: '🔍',
-      sublabel: 'ค้นหาคะแนนรายบุคคล 🎯',
+      sublabel: 'ค้นหาคะแนน & เช็คงานค้างส่ง 🎯',
       icon: Search,
       badgeColor: 'bg-emerald-100 text-emerald-700',
     },
@@ -66,7 +66,7 @@ export default function NavigationSidebar({
       id: 'teacher' as ActiveTab,
       label: '3. หน้าสำหรับครูผู้สอน',
       emoji: '👩‍🏫',
-      sublabel: 'ลงทะเบียน • ตรวจงาน 📝',
+      sublabel: 'ตรวจงาน • แดชบอร์ด • รายงาน 📊',
       icon: GraduationCap,
       badgeColor: 'bg-purple-100 text-purple-700',
     },
@@ -193,7 +193,7 @@ export default function NavigationSidebar({
       {isMobileOpen && (
         <div className="lg:hidden fixed inset-0 z-50 flex">
           <div 
-            className="fixed inset-0 bg-black/50 backdrop-blur-sm"
+            className="fixed inset-0 bg-[#071330]/70 backdrop-blur-sm"
             onClick={() => setIsMobileOpen(false)}
           />
           <div className="relative w-72 max-w-[85vw] h-full z-10 animate-slide-right">
