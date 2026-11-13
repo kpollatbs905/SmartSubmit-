@@ -123,56 +123,82 @@ export default function TeacherPortalView({
   const [newSubjName, setNewSubjName] = useState('');
   const [editingSubject, setEditingSubject] = useState<{ oldCode: string; code: string; name: string } | null>(null);
 
-  // คำนวณปีการศึกษาและภาคเรียนล่าสุดของครูผู้สอนท่านนี้ (จากงานและข้อมูลการส่งงาน)
-  const { latestYear, latestSemester } = useMemo(() => {
+  // Student Roster from Excel Uploads (Declared early for use in teacherAcademicYears computation)
+  const [rosterList, setRosterList] = useState<StudentRosterItem[]>(() => storageService.getStudentRoster());
+
+  // รายการปีการศึกษาจริงที่ครูผู้สอนท่านนี้ใส่ไว้ในระบบ (จากใบงาน, การส่งงาน, รายวิชา, และบัญชีรายชื่อ)
+  const teacherAcademicYears = useMemo(() => {
     const teacherAssignments = activeTeacher 
       ? assignments.filter(a => matchesTeacher(a.teacherName, activeTeacher.fullName))
       : assignments;
     const teacherSubs = activeTeacher
       ? submissions.filter(s => matchesTeacher(s.teacherName, activeTeacher.fullName))
       : submissions;
+    const teacherSubjs = activeTeacher
+      ? subjects.filter(s => matchesTeacher(s.teacherName, activeTeacher.fullName))
+      : subjects;
 
-    const validYears = [
+    // รวบรวมปีการศึกษาที่ครูท่านนี้ใส่ในระบบ
+    const teacherYears = [
       ...teacherAssignments.map(a => a.academicYear?.trim()),
       ...teacherSubs.map(s => s.academicYear?.trim()),
-      ...assignments.map(a => a.academicYear?.trim()),
-      ...submissions.map(s => s.academicYear?.trim()),
+      ...teacherSubjs.map(s => s.academicYear?.trim()),
+      ...rosterList.map(r => r.academicYear?.trim()),
     ].filter((y): y is string => Boolean(y && y.length > 0));
 
-    let bestYear = '2568';
-    if (validYears.length > 0) {
-      const sortedYears = [...new Set(validYears)].sort((a, b) => {
-        const numA = parseInt(a, 10) || 0;
-        const numB = parseInt(b, 10) || 0;
-        return numB - numA;
-      });
-      bestYear = sortedYears[0];
-    }
+    // หากครูยังไม่มีข้อมูลของตัวเอง ให้ดูจากข้อมูลที่มีทั้งหมดในระบบ
+    const allYears = teacherYears.length > 0
+      ? teacherYears
+      : [
+          ...assignments.map(a => a.academicYear?.trim()),
+          ...submissions.map(s => s.academicYear?.trim()),
+          ...subjects.map(s => s.academicYear?.trim()),
+          ...rosterList.map(r => r.academicYear?.trim()),
+        ].filter((y): y is string => Boolean(y && y.length > 0));
 
-    const validSemesters = [
-      ...teacherAssignments.filter(a => (!a.academicYear || a.academicYear.trim() === bestYear)).map(a => a.semester?.trim()),
-      ...teacherSubs.filter(s => (!s.academicYear || s.academicYear.trim() === bestYear)).map(s => s.semester?.trim()),
-      ...assignments.filter(a => (!a.academicYear || a.academicYear.trim() === bestYear)).map(a => a.semester?.trim()),
-      ...submissions.filter(s => (!s.academicYear || s.academicYear.trim() === bestYear)).map(s => s.semester?.trim()),
+    const uniqueYears = Array.from(new Set(allYears)).sort((a, b) => {
+      const numA = parseInt(a, 10) || 0;
+      const numB = parseInt(b, 10) || 0;
+      return numB - numA;
+    });
+
+    return uniqueYears;
+  }, [assignments, submissions, subjects, rosterList, activeTeacher]);
+
+  // รายการภาคเรียนจริงที่ครูใส่ไว้ในระบบ
+  const teacherSemesters = useMemo(() => {
+    const teacherAssignments = activeTeacher 
+      ? assignments.filter(a => matchesTeacher(a.teacherName, activeTeacher.fullName))
+      : assignments;
+    const teacherSubs = activeTeacher
+      ? submissions.filter(s => matchesTeacher(s.teacherName, activeTeacher.fullName))
+      : submissions;
+    const teacherSubjs = activeTeacher
+      ? subjects.filter(s => matchesTeacher(s.teacherName, activeTeacher.fullName))
+      : subjects;
+
+    const sems = [
+      ...teacherAssignments.map(a => a.semester?.trim()),
+      ...teacherSubs.map(s => s.semester?.trim()),
+      ...teacherSubjs.map(s => s.semester?.trim()),
+      ...rosterList.map(r => r.semester?.trim()),
+      ...assignments.map(a => a.semester?.trim()),
+      ...submissions.map(s => s.semester?.trim()),
     ].filter((s): s is string => Boolean(s && s.length > 0));
 
-    let bestSem = '1';
-    if (validSemesters.length > 0) {
-      const sortedSem = [...new Set(validSemesters)].sort((a, b) => {
-        const numA = parseInt(a, 10) || 0;
-        const numB = parseInt(b, 10) || 0;
-        return numB - numA;
-      });
-      bestSem = sortedSem[0];
-    }
+    const uniqueSems = Array.from(new Set(sems)).sort((a, b) => (parseInt(a, 10) || 0) - (parseInt(b, 10) || 0));
+    return uniqueSems.length > 0 ? uniqueSems : ['1', '2'];
+  }, [assignments, submissions, subjects, rosterList, activeTeacher]);
 
+  // คำนวณปีการศึกษาและภาคเรียนล่าสุดของครูผู้สอนท่านนี้ (จากข้อมูลจริงที่ครูใส่ในระบบ ไม่ใช้ค่าฮาร์ดโค้ด 2568)
+  const { latestYear, latestSemester } = useMemo(() => {
+    const bestYear = teacherAcademicYears.length > 0 ? teacherAcademicYears[0] : '';
+    const bestSem = teacherSemesters.length > 0 ? teacherSemesters[teacherSemesters.length - 1] : '1';
     return { latestYear: bestYear, latestSemester: bestSem };
-  }, [assignments, submissions, activeTeacher]);
+  }, [teacherAcademicYears, teacherSemesters]);
 
-  // รายการปีการศึกษาล่าสุดที่มีในระบบ (แสดงปีการศึกษาล่าสุด ไม่ต้องมีปีการศึกษา 2567 2568 ให้เลือก)
-  const availableAcademicYears = useMemo(() => {
-    return [latestYear];
-  }, [latestYear]);
+  // รายการปีการศึกษาที่สามารถเลือกได้
+  const availableAcademicYears = teacherAcademicYears;
 
   // รายวิชาที่ครูท่านนี้สอน ที่นำข้อมูลเข้า หรือมีนักเรียนส่งงาน
   const teacherSubjects = useMemo(() => {
@@ -223,8 +249,7 @@ export default function TeacherPortalView({
     return Array.from(unique.entries()).sort((a, b) => a[0].localeCompare(b[0]));
   }, [subjects, assignments, submissions, activeTeacher]);
 
-  // Student Roster from Excel Uploads
-  const [rosterList, setRosterList] = useState<StudentRosterItem[]>(() => storageService.getStudentRoster());
+
 
   // ห้องเรียนและชั้นที่ครูท่านนี้สอน ที่นำข้อมูลเข้า มีนักเรียนส่งงาน หรือมีรายชื่อที่อัปโหลดไว้
   const teacherClassrooms = useMemo(() => {
@@ -412,6 +437,46 @@ export default function TeacherPortalView({
 
   // Inline grading inputs: mapping submissionId -> { score, feedback }
   const [gradingScores, setGradingScores] = useState<Record<string, { score: string; feedback: string }>>({});
+
+  // Custom AI Grading Criteria (teacher-defined rubric, persisted in localStorage)
+  const criteriaStorageKey = `teacher_custom_ai_criteria_${activeTeacher?.id || 'default'}`;
+  const [customAiCriteria, setCustomAiCriteria] = useState<string>(() => {
+    try {
+      return localStorage.getItem(`teacher_custom_ai_criteria_${activeTeacher?.id || 'default'}`) || '';
+    } catch {
+      return '';
+    }
+  });
+
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem(criteriaStorageKey);
+      if (saved !== null) {
+        setCustomAiCriteria(saved);
+      }
+    } catch {
+      // ignore storage errors
+    }
+  }, [criteriaStorageKey]);
+
+  const handleCustomAiCriteriaChange = (value: string) => {
+    setCustomAiCriteria(value);
+    try {
+      localStorage.setItem(criteriaStorageKey, value);
+    } catch {
+      // ignore storage errors
+    }
+  };
+
+  // Resolve assignment rubric criteria for a given submission
+  const getAssignmentRubric = (sub: Submission): string | undefined => {
+    const matched = assignments.find(
+      a =>
+        a.title.trim() === sub.assignmentName.trim() &&
+        (!sub.subjectCode || a.subjectCode.trim() === sub.subjectCode.trim())
+    );
+    return matched?.rubricCriteria?.trim() || undefined;
+  };
 
   // AI Evaluation modal states
   const [evaluatingSubId, setEvaluatingSubId] = useState<string | null>(null);
@@ -903,6 +968,8 @@ export default function TeacherPortalView({
         workType: sub.workType,
         maxScore: sub.maxScore,
         sampleUrl: sub.sampleUrl,
+        rubricCriteria: getAssignmentRubric(sub),
+        customAiCriteria: customAiCriteria.trim() || undefined,
         studentName: sub.studentName,
         workUrl: sub.workUrl,
         studentNumber: sub.studentNumber,
@@ -993,6 +1060,7 @@ export default function TeacherPortalView({
       title: editingAssignment.title.trim(),
       maxScore: Number(editingAssignment.maxScore),
       sampleUrl: editingAssignment.sampleUrl?.trim() || undefined,
+      rubricCriteria: editingAssignment.rubricCriteria?.trim() || undefined,
     }, sheetConfig);
 
     alertService.close();
@@ -1759,6 +1827,7 @@ export default function TeacherPortalView({
           <div class="bg-violet-50 p-3 rounded-xl border border-violet-200 text-xs space-y-1">
             <p>• จำนวนผลงานที่จะประเมิน: <b class="text-violet-700 font-bold">${targets.length}</b> ชิ้นงาน</p>
             <p>• รูปแบบ: <span class="font-semibold text-gray-700">${evaluateMode === 'unevaluated' ? 'เฉพาะที่ยังไม่ตรวจ' : 'ประเมินผลงานทุกคน'}</span></p>
+            <p>• เกณฑ์ที่ใช้ประเมิน: <span class="font-semibold text-indigo-700">${customAiCriteria.trim() ? customAiCriteria.trim() : 'ใช้เกณฑ์ประจำใบงาน / มาตรฐานชนิดงาน'}</span></p>
           </div>
           <p class="text-[11px] text-amber-800 bg-amber-50 p-2 rounded-lg border border-amber-200">
             💡 AI จะประเมินคะแนน จุดเด่น และคำแนะนำให้อัตโนมัติ คุณครูสามารถนำคะแนนไปใส่ช่องตรวจได้ทันที
@@ -1794,6 +1863,8 @@ export default function TeacherPortalView({
           workType: sub.workType,
           maxScore: sub.maxScore,
           sampleUrl: sub.sampleUrl,
+          rubricCriteria: getAssignmentRubric(sub),
+          customAiCriteria: customAiCriteria.trim() || undefined,
           studentName: sub.studentName,
           workUrl: sub.workUrl,
           studentNumber: sub.studentNumber,
@@ -2388,8 +2459,11 @@ export default function TeacherPortalView({
         <div class="text-left text-sm space-y-2">
           <p class="font-medium text-gray-800">ระบบจะทำการวิเคราะห์และให้คะแนนผลงานของนักเรียนห้อง <b>${reportGrade}/${reportRoom}</b></p>
           <p class="text-xs text-gray-500">จำนวนที่ตรวจรอบนี้: <b class="text-violet-700">${targets.length}</b> ชิ้นงาน</p>
+          <p class="text-xs text-indigo-800 bg-indigo-50 p-2 rounded-xl border border-indigo-200">
+            🎯 เกณฑ์ที่ใช้ประเมิน: <b>${customAiCriteria.trim() ? customAiCriteria.trim() : 'ใช้เกณฑ์ประจำใบงาน / มาตรฐานชนิดงาน'}</b>
+          </p>
           <p class="text-xs text-amber-800 bg-amber-50 p-2.5 rounded-xl border border-amber-200">
-            💡 AI จะตรวจตามรูบริก ชนิดของงาน พร้อมประเมินจุดเด่นและข้อเสนอแนะรายบุคคลให้อัตโนมัติ
+            💡 AI จะตรวจตามเกณฑ์ที่ครูกำหนด ชนิดของงาน พร้อมประเมินจุดเด่นและข้อเสนอแนะรายบุคคลให้อัตโนมัติ
           </p>
         </div>
       `,
@@ -2422,6 +2496,8 @@ export default function TeacherPortalView({
           workType: sub.workType,
           maxScore: sub.maxScore,
           sampleUrl: sub.sampleUrl,
+          rubricCriteria: getAssignmentRubric(sub),
+          customAiCriteria: customAiCriteria.trim() || undefined,
           studentName: sub.studentName,
           workUrl: sub.workUrl,
           studentNumber: sub.studentNumber,
@@ -4214,38 +4290,44 @@ export default function TeacherPortalView({
 
             {/* Sub-row: ปีการศึกษา, ภาคเรียน, ค้นหา (ไม่ต้องกรองชื่อผู้สอนคนอื่น) */}
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-1 border-t border-purple-50">
-              {/* ปีการศึกษาล่าสุด (แสดงปีการศึกษาล่าสุด ไม่ต้องมีปีการศึกษา 2567 2568 ให้เลือก) */}
+              {/* ปีการศึกษาที่ครูใส่ในระบบ */}
               <div>
                 <label className="block text-[11px] font-semibold text-gray-600 mb-1 flex items-center gap-1">
                   <span>📅</span>
                   <span>ปีการศึกษา</span>
                 </label>
-                <div className="w-full px-3 py-2 bg-gradient-to-r from-purple-50/80 via-indigo-50/60 to-purple-50/80 border border-purple-200/90 rounded-xl text-xs font-bold text-purple-950 flex items-center justify-between shadow-2xs">
-                  <span className="flex items-center gap-1.5">
-                    <span>🎓</span>
-                    <span>ปีการศึกษา {latestYear}</span>
-                  </span>
-                  <span className="text-[10px] font-extrabold bg-gradient-to-r from-violet-600 to-indigo-600 text-white px-2 py-0.5 rounded-full shadow-2xs">
-                    ล่าสุด
-                  </span>
-                </div>
+                <select
+                  value={dashYear}
+                  onChange={(e) => setDashYear(e.target.value)}
+                  className="w-full px-2.5 py-1.5 bg-gray-50 border border-gray-200 rounded-lg text-xs font-medium text-gray-700 cursor-pointer focus:outline-none focus:ring-2 focus:ring-purple-300"
+                >
+                  <option value="ALL">-- ทุกปีการศึกษา --</option>
+                  {teacherAcademicYears.map((y) => (
+                    <option key={y} value={y}>
+                      ปีการศึกษา {y}
+                    </option>
+                  ))}
+                </select>
               </div>
 
-              {/* ภาคเรียนล่าสุด */}
+              {/* ภาคเรียนที่ครูใส่ในระบบ */}
               <div>
                 <label className="block text-[11px] font-semibold text-gray-600 mb-1 flex items-center gap-1">
                   <span>📆</span>
                   <span>ภาคเรียน</span>
                 </label>
-                <div className="w-full px-3 py-2 bg-gradient-to-r from-purple-50/80 via-indigo-50/60 to-purple-50/80 border border-purple-200/90 rounded-xl text-xs font-bold text-purple-950 flex items-center justify-between shadow-2xs">
-                  <span className="flex items-center gap-1.5">
-                    <span>📖</span>
-                    <span>ภาคเรียนที่ {latestSemester}</span>
-                  </span>
-                  <span className="text-[10px] font-extrabold bg-gradient-to-r from-violet-600 to-indigo-600 text-white px-2 py-0.5 rounded-full shadow-2xs">
-                    ล่าสุด
-                  </span>
-                </div>
+                <select
+                  value={dashSemester}
+                  onChange={(e) => setDashSemester(e.target.value)}
+                  className="w-full px-2.5 py-1.5 bg-gray-50 border border-gray-200 rounded-lg text-xs font-medium text-gray-700 cursor-pointer focus:outline-none focus:ring-2 focus:ring-purple-300"
+                >
+                  <option value="ALL">-- ทุกภาคเรียน --</option>
+                  {teacherSemesters.map((s) => (
+                    <option key={s} value={s}>
+                      ภาคเรียนที่ {s}
+                    </option>
+                  ))}
+                </select>
               </div>
 
               {/* ค้นหาด่วน & ปุ่มค้นหา */}
@@ -4894,6 +4976,70 @@ export default function TeacherPortalView({
                 </button>
               </div>
             </div>
+
+            {/* ช่องกำหนดเกณฑ์การให้คะแนนด้วย AI ตามต้องการ */}
+            <div className="bg-white/10 backdrop-blur-xs rounded-2xl p-4 border border-indigo-300/25 space-y-2.5">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                <label className="text-xs font-bold text-white flex items-center gap-2">
+                  <span>🎯 กำหนดเกณฑ์การให้คะแนนด้วย AI (ระบุเกณฑ์ตามต้องการ)</span>
+                  <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                    customAiCriteria.trim()
+                      ? 'bg-emerald-500/25 text-emerald-200 border border-emerald-400/40'
+                      : 'bg-indigo-500/25 text-indigo-200 border border-indigo-400/30'
+                  }`}>
+                    {customAiCriteria.trim() ? '✓ ใช้เกณฑ์ที่ครูกำหนด' : 'ค่าเริ่มต้น: ตามชนิดงาน/ใบงาน'}
+                  </span>
+                </label>
+
+                <div className="flex flex-wrap items-center gap-1.5">
+                  <span className="text-[10px] text-indigo-200/80 mr-1">ตัวอย่างเกณฑ์ด่วน:</span>
+                  {[
+                    {
+                      label: '📝 ใบงาน',
+                      text: 'ความถูกต้องของคำตอบ 5 คะแนน, แสดงวิธีทำ/อธิบายครบถ้วน 3 คะแนน, ความเรียบร้อยและส่งตรงเวลา 2 คะแนน',
+                    },
+                    {
+                      label: '🎨 กราฟิก/Canva',
+                      text: 'เนื้อหาถูกต้องครบถ้วน 4 คะแนน, การออกแบบและจัดวางสวยงาม 4 คะแนน, ความคิดสร้างสรรค์และความเรียบร้อย 2 คะแนน',
+                    },
+                    {
+                      label: '💻 Coding/ผังงาน',
+                      text: 'ลำดับตรรกะและสัญลักษณ์ถูกต้อง 5 คะแนน, ผลลัพธ์ทำงานได้จริง 3 คะแนน, ความเป็นระเบียบและความคิดริเริ่ม 2 คะแนน',
+                    },
+                    {
+                      label: '🎬 วิดีโอ/นำเสนอ',
+                      text: 'สาระความรู้ตรงประเด็น 4 คะแนน, ทักษะการพูดนำเสนอ 3 คะแนน, การตัดต่อและความน่าสนใจ 3 คะแนน',
+                    },
+                  ].map((preset) => (
+                    <button
+                      key={preset.label}
+                      type="button"
+                      onClick={() => handleCustomAiCriteriaChange(preset.text)}
+                      className="px-2 py-1 rounded-lg bg-white/10 hover:bg-white/20 text-indigo-100 text-[10px] font-semibold border border-white/15 transition-colors cursor-pointer"
+                    >
+                      {preset.label}
+                    </button>
+                  ))}
+                  {customAiCriteria.trim() && (
+                    <button
+                      type="button"
+                      onClick={() => handleCustomAiCriteriaChange('')}
+                      className="px-2 py-1 rounded-lg bg-rose-500/25 hover:bg-rose-500/40 text-rose-100 text-[10px] font-semibold border border-rose-400/30 transition-colors cursor-pointer"
+                    >
+                      ล้างเกณฑ์
+                    </button>
+                  )}
+                </div>
+              </div>
+
+              <textarea
+                rows={2}
+                value={customAiCriteria}
+                onChange={(e) => handleCustomAiCriteriaChange(e.target.value)}
+                placeholder="พิมพ์เกณฑ์การให้คะแนนที่ต้องการให้ AI ใช้ประเมิน เช่น: ความถูกต้องของเนื้อหา 5 คะแนน, ความคิดสร้างสรรค์ 3 คะแนน, ความเรียบร้อยและการส่งตรงเวลา 2 คะแนน (หากเว้นว่าง ระบบจะใช้เกณฑ์ประจำใบงานหรือเกณฑ์มาตรฐาน)"
+                className="w-full px-3.5 py-2.5 bg-[#071330]/80 border border-indigo-300/30 rounded-xl text-xs text-white placeholder:text-indigo-200/50 focus:outline-none focus:ring-2 focus:ring-pink-400/60"
+              />
+            </div>
           </div>
 
           {/* Filter Bar */}
@@ -4926,32 +5072,44 @@ export default function TeacherPortalView({
             </div>
 
             <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-3 pt-2">
-              {/* ปีการศึกษาล่าสุด (ไม่ต้องมีปีการศึกษา 2567 2568 ให้เลือก) */}
+              {/* ปีการศึกษาที่ครูใส่ในระบบ */}
               <div>
                 <label className="block text-[11px] font-semibold text-gray-700 mb-1 flex items-center gap-1">
                   <span>📅</span>
                   <span>ปีการศึกษา</span>
                 </label>
-                <div className="w-full px-2.5 py-2 bg-gradient-to-r from-purple-50/80 via-indigo-50/60 to-purple-50/80 border border-purple-200/90 rounded-xl text-xs font-bold text-purple-950 flex items-center justify-between shadow-2xs">
-                  <span>ปี {latestYear}</span>
-                  <span className="text-[10px] font-extrabold bg-gradient-to-r from-violet-600 to-indigo-600 text-white px-1.5 py-0.5 rounded-full">
-                    ล่าสุด
-                  </span>
-                </div>
+                <select
+                  value={filterYear}
+                  onChange={(e) => setFilterYear(e.target.value)}
+                  className="w-full px-2 py-2 bg-purple-50/20 border border-purple-200/80 rounded-xl text-xs font-semibold text-gray-800 cursor-pointer focus:outline-none focus:ring-2 focus:ring-purple-300"
+                >
+                  <option value="ALL">-- ทุกปีการศึกษา --</option>
+                  {teacherAcademicYears.map((y) => (
+                    <option key={y} value={y}>
+                      ปีการศึกษา {y}
+                    </option>
+                  ))}
+                </select>
               </div>
 
-              {/* ภาคเรียนล่าสุด */}
+              {/* ภาคเรียนที่ครูใส่ในระบบ */}
               <div>
                 <label className="block text-[11px] font-semibold text-gray-700 mb-1 flex items-center gap-1">
                   <span>📆</span>
                   <span>ภาคเรียน</span>
                 </label>
-                <div className="w-full px-2.5 py-2 bg-gradient-to-r from-purple-50/80 via-indigo-50/60 to-purple-50/80 border border-purple-200/90 rounded-xl text-xs font-bold text-purple-950 flex items-center justify-between shadow-2xs">
-                  <span>เทอม {latestSemester}</span>
-                  <span className="text-[10px] font-extrabold bg-gradient-to-r from-violet-600 to-indigo-600 text-white px-1.5 py-0.5 rounded-full">
-                    ล่าสุด
-                  </span>
-                </div>
+                <select
+                  value={filterSemester}
+                  onChange={(e) => setFilterSemester(e.target.value)}
+                  className="w-full px-2 py-2 bg-purple-50/20 border border-purple-200/80 rounded-xl text-xs font-semibold text-gray-800 cursor-pointer focus:outline-none focus:ring-2 focus:ring-purple-300"
+                >
+                  <option value="ALL">-- ทุกภาคเรียน --</option>
+                  {teacherSemesters.map((s) => (
+                    <option key={s} value={s}>
+                      ภาคเรียนที่ {s}
+                    </option>
+                  ))}
+                </select>
               </div>
 
               {/* เลือกวิชา */}
@@ -5061,7 +5219,7 @@ export default function TeacherPortalView({
                   <span>ข้อมูลที่กรอง:</span>
                 </span>
                 <span className="text-gray-700">
-                  ปี {latestYear} • เทอม {latestSemester} (ล่าสุด) • {filterSubject !== 'ALL' ? filterSubject : 'ทุกวิชา'} • {filterGrade !== 'ALL' ? filterGrade : 'ทุกชั้น'} • {filterRoom !== 'ALL' ? `ห้อง ${filterRoom}` : 'ทุกห้อง'} • {filterStatus !== 'ALL' ? filterStatus : 'ทุกสถานะ'} • {filterAiStatus !== 'ALL' ? (filterAiStatus === 'EVALUATED' ? 'AI ตรวจแล้ว' : 'AI ยังไม่ตรวจ') : 'ทุกสถานะ AI'}
+                  ปี {filterYear !== 'ALL' ? filterYear : 'ทุกปี'} • {filterSemester !== 'ALL' ? `เทอม ${filterSemester}` : 'ทุกเทอม'} • {filterSubject !== 'ALL' ? filterSubject : 'ทุกวิชา'} • {filterGrade !== 'ALL' ? filterGrade : 'ทุกชั้น'} • {filterRoom !== 'ALL' ? `ห้อง ${filterRoom}` : 'ทุกห้อง'} • {filterStatus !== 'ALL' ? filterStatus : 'ทุกสถานะ'} • {filterAiStatus !== 'ALL' ? (filterAiStatus === 'EVALUATED' ? 'AI ตรวจแล้ว' : 'AI ยังไม่ตรวจ') : 'ทุกสถานะ AI'}
                 </span>
                 <span className="bg-gradient-to-r from-violet-600 to-indigo-600 text-white font-bold px-2.5 py-0.5 rounded-full text-[10px] shadow-xs">
                   ✨ พบ {displayGradingCount} รายการ
@@ -5380,6 +5538,31 @@ export default function TeacherPortalView({
                   <span>🗑️ ลบข้อมูลห้องนี้</span>
                 </button>
               </div>
+            </div>
+
+            {/* ช่องกำหนดเกณฑ์การให้คะแนนด้วย AI สำหรับตรวจประเมินรายห้อง */}
+            <div className="p-3.5 bg-gradient-to-r from-violet-50 via-indigo-50/70 to-purple-50 rounded-2xl border border-violet-200/80 space-y-2">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <label className="text-xs font-bold text-indigo-950 flex items-center gap-1.5">
+                  <span>🎯 เกณฑ์การให้คะแนนด้วย AI (ระบุเกณฑ์ตามต้องการก่อนกดให้ AI ตรวจ)</span>
+                </label>
+                {customAiCriteria.trim() && (
+                  <button
+                    type="button"
+                    onClick={() => handleCustomAiCriteriaChange('')}
+                    className="text-[11px] font-semibold text-rose-600 hover:text-rose-800 cursor-pointer"
+                  >
+                    ล้างเกณฑ์
+                  </button>
+                )}
+              </div>
+              <textarea
+                rows={2}
+                value={customAiCriteria}
+                onChange={(e) => handleCustomAiCriteriaChange(e.target.value)}
+                placeholder="พิมพ์เกณฑ์การให้คะแนนที่ต้องการให้ AI ใช้ประเมินห้องนี้ เช่น: ความถูกต้อง 5 คะแนน, ความคิดสร้างสรรค์ 3 คะแนน, ความเรียบร้อย 2 คะแนน (เว้นว่างเพื่อใช้เกณฑ์ประจำใบงาน)"
+                className="w-full px-3 py-2 bg-white border border-violet-200 rounded-xl text-xs text-gray-800 focus:outline-none focus:ring-2 focus:ring-violet-300"
+              />
             </div>
 
             {/* Quick Grade Selector (ม.1 - ม.6) */}
@@ -7242,6 +7425,24 @@ export default function TeacherPortalView({
                         )}
                       </div>
                     </div>
+
+                    {/* เกณฑ์การให้คะแนนด้วย AI */}
+                    <div>
+                      <label className="block text-[11px] font-semibold text-gray-700 mb-1 flex items-center justify-between">
+                        <span className="flex items-center gap-1">
+                          <span>🎯</span>
+                          <span>เกณฑ์การให้คะแนนด้วย AI (ระบุเกณฑ์ของใบงานนี้ได้ตามต้องการ)</span>
+                        </span>
+                        <span className="text-[10px] text-indigo-600 font-medium">AI จะให้คะแนนตามเกณฑ์นี้</span>
+                      </label>
+                      <textarea
+                        rows={2}
+                        value={item.rubricCriteria || ''}
+                        onChange={(e) => handleItemChange(index, 'rubricCriteria', e.target.value)}
+                        placeholder="เช่น ความถูกต้องของเนื้อหา 5 คะแนน, ความคิดสร้างสรรค์ 3 คะแนน, ความเรียบร้อยและส่งตรงเวลา 2 คะแนน"
+                        className="w-full px-3 py-2 bg-white border border-purple-200/80 rounded-xl text-xs text-gray-800 focus:outline-none focus:ring-2 focus:ring-purple-300"
+                      />
+                    </div>
                   </div>
                 ))}
               </div>
@@ -7506,6 +7707,21 @@ export default function TeacherPortalView({
                 />
               </div>
 
+              {/* เกณฑ์การให้คะแนนด้วย AI */}
+              <div>
+                <label className="block text-xs font-semibold text-gray-700 mb-1 flex items-center justify-between">
+                  <span>🎯 เกณฑ์การให้คะแนนด้วย AI (Rubric / เกณฑ์ตามต้องการ)</span>
+                  <span className="text-[10px] text-indigo-600 font-medium">ใช้สำหรับ AI ตรวจงาน</span>
+                </label>
+                <textarea
+                  rows={2}
+                  value={editingAssignment.rubricCriteria || ''}
+                  onChange={(e) => setEditingAssignment(prev => prev ? { ...prev, rubricCriteria: e.target.value } : null)}
+                  placeholder="เช่น ความถูกต้อง 5 คะแนน, ความคิดสร้างสรรค์ 3 คะแนน, ความเรียบร้อย 2 คะแนน"
+                  className="w-full px-3 py-2 bg-gray-50 border border-gray-200 rounded-xl text-xs text-gray-800 focus:outline-none focus:ring-2 focus:ring-amber-300"
+                />
+              </div>
+
               <div className="p-3 bg-amber-50 rounded-2xl border border-amber-200 text-xs text-amber-900 leading-relaxed flex items-center gap-2">
                 <span>💡</span>
                 <span>เมื่อบันทึกการแก้ไข ข้อมูลในระบบและ Google Sheet จะอัปเดตอัตโนมัติทันที</span>
@@ -7591,6 +7807,13 @@ export default function TeacherPortalView({
                 </a>
               )}
             </div>
+
+            {activeAiModal.result.appliedCriteria && (
+              <div className="p-3 bg-indigo-50/80 border border-indigo-200/80 rounded-2xl text-xs text-indigo-950">
+                <span className="font-bold">🎯 เกณฑ์ที่ครูใช้ประเมิน:</span>{' '}
+                <span>{activeAiModal.result.appliedCriteria}</span>
+              </div>
+            )}
 
             {/* Score Banner */}
             <div className="p-4 bg-gradient-to-r from-violet-50 via-purple-50 to-pink-50 border border-purple-200/80 rounded-2xl flex flex-col sm:flex-row sm:items-center justify-between gap-4 shadow-xs">

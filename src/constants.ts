@@ -28,7 +28,7 @@ export const GRADE_LEVELS = ['ม.1', 'ม.2', 'ม.3', 'ม.4', 'ม.5', 'ม.6
 
 export const ROOMS = Array.from({ length: 14 }, (_, i) => String(i + 1));
 
-export const ACADEMIC_YEARS = ['2568'];
+export const ACADEMIC_YEARS = ['2567', '2568', '2569'];
 
 export const SEMESTERS = [
   { value: '1', label: 'ภาคเรียนที่ 1' },

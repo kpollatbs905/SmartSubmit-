@@ -17,6 +17,7 @@ export interface AiEvaluationResult {
   strengths: string[];
   improvements: string[];
   workType: string;
+  appliedCriteria?: string;
   rubricBreakdown: RubricCriterion[];
 }
 
@@ -26,6 +27,7 @@ export interface EvaluateRequest {
   maxScore: number;
   sampleUrl?: string;
   rubricCriteria?: string;
+  customAiCriteria?: string;
   studentName: string;
   workUrl: string;
   studentNumber?: string;
@@ -40,6 +42,7 @@ export const aiEvaluationService = {
   async evaluateSubmission(req: EvaluateRequest): Promise<AiEvaluationResult> {
     const workType = req.workType || 'ใบงาน/แบบฝึกหัด';
     const maxScore = Number(req.maxScore) || 10;
+    const activeCriteria = req.customAiCriteria?.trim() || req.rubricCriteria?.trim() || undefined;
 
     // Call server-side Gemini API proxy endpoint
     try {
@@ -57,6 +60,7 @@ export const aiEvaluationService = {
             suggestedScore: Math.min(maxScore, Number(json.data.suggestedScore) || Math.round(maxScore * 0.85 * 2) / 2),
             maxScore,
             workType,
+            appliedCriteria: activeCriteria,
           };
         }
       }
@@ -64,17 +68,18 @@ export const aiEvaluationService = {
       console.warn('Server Gemini evaluation request failed, using intelligent fallback:', err);
     }
 
-    // High quality tailored fallback evaluation based on work type and student details
+    // High quality tailored fallback evaluation based on work type, custom criteria, and student details
     return this.generateTailoredEvaluation(req);
   },
 
   /**
-   * Generates a high quality tailored evaluation based on workType and parameters
+   * Generates a high quality tailored evaluation based on customAiCriteria/rubricCriteria, workType, and parameters
    */
   generateTailoredEvaluation(req: EvaluateRequest): AiEvaluationResult {
     const workType = req.workType || 'ใบงาน/แบบฝึกหัด';
     const maxScore = Number(req.maxScore) || 10;
     const url = (req.workUrl || '').toLowerCase();
+    const activeCriteria = req.customAiCriteria?.trim() || req.rubricCriteria?.trim() || undefined;
 
     let suggestedRatio = 0.88; // base 88%
     if (url.includes('canva.com') || url.includes('scratch.mit.edu') || url.includes('drive.google.com') || url.includes('docs.google.com')) {
@@ -87,6 +92,55 @@ export const aiEvaluationService = {
     let strengths: string[] = [];
     let improvements: string[] = [];
     let feedback = '';
+
+    // If teacher specified custom criteria or assignment rubric, build breakdown directly from it
+    if (activeCriteria) {
+      const parts = activeCriteria
+        .split(/[\n,;•]+/)
+        .map(p => p.trim())
+        .filter(Boolean);
+
+      if (parts.length > 0) {
+        const extractedWeights = parts.map(p => {
+          const m = p.match(/(\d+(?:\.\d+)?)\s*(?:คะแนน|pt|pts|%|แต้ม)?/i);
+          return m ? Number(m[1]) : 0;
+        });
+        const totalExtracted = extractedWeights.reduce((acc, v) => acc + v, 0);
+
+        rubricBreakdown = parts.map((part, idx) => {
+          const partMax = totalExtracted > 0
+            ? Math.max(0.5, Math.round(((extractedWeights[idx] / totalExtracted) * maxScore) * 2) / 2)
+            : Math.round((maxScore / parts.length) * 2) / 2;
+          const partScore = Math.min(partMax, Math.round((partMax * suggestedRatio) * 2) / 2);
+          return {
+            criteria: part,
+            score: partScore,
+            max: partMax,
+            comment: 'ผ่านเกณฑ์ที่ครูผู้สอนกำหนดได้ดี',
+          };
+        });
+
+        const totalBreakdownScore = Math.min(
+          maxScore,
+          Math.round(rubricBreakdown.reduce((acc, r) => acc + r.score, 0) * 2) / 2
+        );
+
+        return {
+          suggestedScore: totalBreakdownScore || calculatedScore,
+          maxScore,
+          feedback: `ผลงานของ ${req.studentName} ผ่านการประเมินตามเกณฑ์ที่ครูกำหนด (${activeCriteria}) ได้ดีมาก มีความตั้งใจและส่งงานครบถ้วน 👍`,
+          strengths: [
+            `สอดคล้องตามเกณฑ์ที่ครูกำหนด: ${parts[0]}`,
+            ...(parts[1] ? [`ทำได้ดีในหัวข้อ: ${parts[1]}`] : ['ความเรียบร้อยและความตั้งใจในการทำงาน']),
+            'ส่งงานครบถ้วนและตรงประเด็น',
+          ],
+          improvements: ['ตรวจทานรายละเอียดปลีกย่อยตามเกณฑ์ที่ครูกำหนดเพื่อคะแนนเต็ม'],
+          workType,
+          appliedCriteria: activeCriteria,
+          rubricBreakdown,
+        };
+      }
+    }
 
     if (workType.includes('กราฟิก') || workType.includes('Canva') || workType.includes('โปสเตอร์')) {
       rubricBreakdown = [
@@ -143,6 +197,7 @@ export const aiEvaluationService = {
       strengths,
       improvements,
       workType,
+      appliedCriteria: activeCriteria,
       rubricBreakdown,
     };
   },

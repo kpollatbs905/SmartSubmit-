@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState, useEffect, useMemo, useRef } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { 
   Send, 
   ExternalLink, 
@@ -27,7 +27,7 @@ import {
 } from 'lucide-react';
 import Swal from 'sweetalert2';
 import { Submission, GradeLevel, Teacher, Assignment, GoogleSheetConfig } from '../types';
-import { GRADE_LEVELS, ROOMS, ACADEMIC_YEARS, SEMESTERS } from '../constants';
+import { GRADE_LEVELS, ROOMS, SEMESTERS } from '../constants';
 import { alertService } from '../services/alertService';
 import { storageService } from '../services/storageService';
 
@@ -58,60 +58,35 @@ export default function StudentSubmissionView({
   prefillAssignment,
   onClearPrefill,
 }: Props) {
-  // คำนวณปีการศึกษาและภาคเรียนล่าสุดจากงานที่ครูสร้างไว้ในระบบ
-  const { latestYear, latestSemester } = useMemo(() => {
-    const validYears = assignments
-      .map((a) => a.academicYear?.trim())
-      .filter((y): y is string => Boolean(y && y.length > 0));
+  // รวมรายการปีการศึกษา โดยเริ่มต้นที่ 2569 ตามด้วยปีการศึกษาที่ครูใส่งานไว้ในระบบ
+  const availableYears = useMemo(() => {
+    const subjects = storageService.getSubjects();
+    const roster = storageService.getStudentRoster();
+    const yearSet = new Set<string>(['2569']);
 
-    let bestYear = '2568';
-    if (validYears.length > 0) {
-      const sortedYears = [...new Set(validYears)].sort((a, b) => {
-        const numA = parseInt(a, 10) || 0;
-        const numB = parseInt(b, 10) || 0;
-        return numB - numA;
-      });
-      bestYear = sortedYears[0];
-    }
+    assignments.forEach((a) => {
+      const y = a.academicYear?.trim();
+      if (y) yearSet.add(y);
+    });
+    subjects.forEach((s) => {
+      const y = s.academicYear?.trim();
+      if (y) yearSet.add(y);
+    });
+    roster.forEach((r) => {
+      const y = r.academicYear?.trim();
+      if (y) yearSet.add(y);
+    });
 
-    const validSemesters = assignments
-      .filter((a) => (!a.academicYear || a.academicYear.trim() === bestYear) && a.semester?.trim())
-      .map((a) => a.semester!.trim());
+    const otherTeacherYears = Array.from(yearSet)
+      .filter((y) => y !== '2569')
+      .sort((a, b) => (parseInt(b, 10) || 0) - (parseInt(a, 10) || 0));
 
-    let bestSem = '1';
-    if (validSemesters.length > 0) {
-      const sortedSem = [...new Set(validSemesters)].sort((a, b) => {
-        const numA = parseInt(a, 10) || 0;
-        const numB = parseInt(b, 10) || 0;
-        return numB - numA;
-      });
-      bestSem = sortedSem[0];
-    }
-
-    return { latestYear: bestYear, latestSemester: bestSem };
+    return ['2569', ...otherTeacherYears];
   }, [assignments]);
 
-  // รวมรายการปีการศึกษาล่าสุดที่มีในระบบ
-  const availableYears = useMemo(() => {
-    const set = new Set([
-      latestYear,
-      ...assignments.map((a) => a.academicYear?.trim()).filter(Boolean) as string[],
-    ]);
-    return Array.from(set).sort((a, b) => (parseInt(b, 10) || 0) - (parseInt(a, 10) || 0));
-  }, [assignments, latestYear]);
-
-  // ค่าปีการศึกษาและภาคเรียน - นำปีและเทอมล่าสุดที่ครูสร้างไว้มาแสดงเป็นค่าเริ่มต้น
-  const [academicYear, setAcademicYear] = useState<string>(() => latestYear);
-  const [semester, setSemester] = useState<string>(() => latestSemester);
-  const userChangedAcademicYearRef = useRef<boolean>(false);
-
-  // อัปเดตปีและเทอมล่าสุดอัตโนมัติหากยังไม่ได้เลือกเองและไม่มีการส่ง prefillAssignment เข้ามา
-  useEffect(() => {
-    if (!prefillAssignment && !userChangedAcademicYearRef.current) {
-      setAcademicYear(latestYear);
-      setSemester(latestSemester);
-    }
-  }, [latestYear, latestSemester, prefillAssignment]);
+  // ค่าปีการศึกษาและภาคเรียนเริ่มต้น: ปีการศึกษา 2569 ภาคเรียนที่ 2
+  const [academicYear, setAcademicYear] = useState<string>('2569');
+  const [semester, setSemester] = useState<string>('2');
 
   // Student persistent info
   const [gradeLevel, setGradeLevel] = useState<GradeLevel>('ม.1');
@@ -415,8 +390,8 @@ export default function StudentSubmissionView({
         maxScore: currentAssignment.maxScore,
         workType: currentAssignment.workType || 'ใบงาน/แบบฝึกหัด',
         sampleUrl: currentAssignment.sampleUrl,
-        academicYear: academicYear || currentAssignment.academicYear || '2567',
-        semester: semester || currentAssignment.semester || '1',
+        academicYear: academicYear || currentAssignment.academicYear || '2569',
+        semester: semester || currentAssignment.semester || '2',
         workUrl: workUrl.trim(),
         score: null,
         status: 'รอตรวจ',
@@ -566,8 +541,8 @@ export default function StudentSubmissionView({
               <select
                 value={academicYear}
                 onChange={(e) => {
-                  userChangedAcademicYearRef.current = true;
                   setAcademicYear(e.target.value);
+                  setSelectedAssignmentId('');
                 }}
                 className="w-full px-3.5 py-2.5 rounded-xl border border-purple-200/80 bg-purple-50/20 focus:bg-white text-gray-800 text-sm font-semibold focus:outline-none focus:ring-2 focus:ring-purple-300 focus:border-purple-400 transition-all shadow-xs cursor-pointer"
               >
@@ -594,8 +569,8 @@ export default function StudentSubmissionView({
               <select
                 value={semester}
                 onChange={(e) => {
-                  userChangedAcademicYearRef.current = true;
                   setSemester(e.target.value);
+                  setSelectedAssignmentId('');
                 }}
                 className="w-full px-3.5 py-2.5 rounded-xl border border-purple-200/80 bg-purple-50/20 focus:bg-white text-gray-800 text-sm font-semibold focus:outline-none focus:ring-2 focus:ring-purple-300 focus:border-purple-400 transition-all shadow-xs cursor-pointer"
               >
