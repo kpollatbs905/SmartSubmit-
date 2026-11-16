@@ -7,7 +7,6 @@ import React, { useState, useMemo, useEffect } from 'react';
 import { 
   Search, 
   ExternalLink, 
-  Filter, 
   RefreshCw, 
   FileSpreadsheet, 
   FileDown, 
@@ -18,23 +17,10 @@ import {
   BookOpen,
   Calendar,
   Layers,
-  Trash2,
-  AlertTriangle,
-  Edit3,
   Plus,
   Send,
-  CheckCircle2,
-  XCircle,
-  AlertCircle,
-  ChevronRight,
-  Sparkles,
-  HelpCircle,
-  User,
-  Hash,
-  Save,
-  X
+  AlertCircle
 } from 'lucide-react';
-import Swal from 'sweetalert2';
 import { Submission, GradeLevel, GoogleSheetConfig, Assignment, Teacher } from '../types';
 import { GRADE_LEVELS, ROOMS } from '../constants';
 import { storageService, normalizeRoom, normalizeGradeLevel, stripThaiPrefix } from '../services/storageService';
@@ -98,15 +84,6 @@ export default function SubmissionStatusView({
 
   // Modal states
   const [viewingDetail, setViewingDetail] = useState<Submission | null>(null);
-  const [editingSubmission, setEditingSubmission] = useState<Submission | null>(null);
-
-  // Edit form state
-  const [editStudentName, setEditStudentName] = useState('');
-  const [editStudentNumber, setEditStudentNumber] = useState('');
-  const [editGradeLevel, setEditGradeLevel] = useState<GradeLevel>('ม.1');
-  const [editRoom, setEditRoom] = useState('1');
-  const [editWorkUrl, setEditWorkUrl] = useState('');
-  const [isSavingEdit, setIsSavingEdit] = useState(false);
 
   // Sync initialSearchTerm if changed from outside
   useEffect(() => {
@@ -369,226 +346,6 @@ export default function SubmissionStatusView({
     }
   };
 
-  // Open Edit Modal for a submission
-  const handleOpenEdit = (sub: Submission) => {
-    setEditingSubmission(sub);
-    setEditStudentName(sub.studentName);
-    setEditStudentNumber(sub.studentNumber);
-    setEditGradeLevel(sub.gradeLevel);
-    setEditRoom(sub.room);
-    setEditWorkUrl(sub.workUrl);
-  };
-
-  // Save Edit Submission
-  const handleSaveEdit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!editingSubmission) return;
-
-    if (!editStudentName.trim()) {
-      alertService.error('กรุณาระบุชื่อ-นามสกุล', 'โปรดกรอกชื่อและนามสกุลของนักเรียน');
-      return;
-    }
-    if (!editStudentNumber.trim()) {
-      alertService.error('กรุณาระบุเลขที่', 'โปรดกรอกเลขที่ของนักเรียน');
-      return;
-    }
-    if (!editWorkUrl.trim()) {
-      alertService.error('กรุณาระบุลิงก์งาน', 'โปรดกรอกหรือวาง URL ผลงาน');
-      return;
-    }
-
-    try {
-      setIsSavingEdit(true);
-      alertService.loading('กำลังบันทึกการแก้ไข...', 'ระบบกำลังอัปเดตข้อมูลผลงานและซิงค์ข้อมูล');
-
-      const res = await storageService.updateSubmissionStudent(
-        editingSubmission.id,
-        {
-          studentName: editStudentName,
-          studentNumber: editStudentNumber,
-          gradeLevel: editGradeLevel,
-          room: editRoom,
-          workUrl: editWorkUrl,
-        },
-        sheetConfig
-      );
-
-      await onRefreshData();
-      if (onDataChange) onDataChange();
-      setIsSavingEdit(false);
-      alertService.close();
-
-      if (res.success) {
-        setEditingSubmission(null);
-        if (viewingDetail && viewingDetail.id === editingSubmission.id) {
-          setViewingDetail({
-            ...viewingDetail,
-            studentName: editStudentName,
-            studentNumber: editStudentNumber,
-            gradeLevel: editGradeLevel,
-            room: editRoom,
-            workUrl: editWorkUrl,
-          });
-        }
-        alertService.success('แก้ไขข้อมูลสำเร็จ! ✨', 'ข้อมูลผลงานได้รับการปรับปรุงเรียบร้อยแล้ว');
-      } else {
-        alertService.error('การแก้ไขไม่สำเร็จ', res.message);
-      }
-    } catch (err: any) {
-      setIsSavingEdit(false);
-      alertService.close();
-      alertService.error('เกิดข้อผิดพลาด', err?.message || 'โปรดตรวจสอบการเชื่อมต่อ');
-    }
-  };
-
-  // ตรวจสอบว่าชิ้นงานนี้เป็นงานที่ส่งซ้ำหรือไม่ (นักเรียนคนเดียวกัน ระดับชั้น/ห้องเดียวกัน ในวิชาและงานเดียวกัน)
-  const isDuplicateItem = React.useCallback((item: Submission) => {
-    const cleanItemName = stripThaiPrefix(item.studentName).toLowerCase();
-    const cleanItemNum = String(item.studentNumber || '').trim();
-    const cleanItemGrade = normalizeGradeLevel(item.gradeLevel);
-    const cleanItemRoom = normalizeRoom(item.room);
-    const cleanItemAssign = (item.assignmentName || '').trim().toLowerCase();
-
-    return submissions.some(s => {
-      if (s.id === item.id) return false;
-      const cleanName = stripThaiPrefix(s.studentName).toLowerCase();
-      const cleanNum = String(s.studentNumber || '').trim();
-      const cleanGrade = normalizeGradeLevel(s.gradeLevel);
-      const cleanRoom = normalizeRoom(s.room);
-      const cleanAssign = (s.assignmentName || '').trim().toLowerCase();
-
-      const sameStudent = (cleanNum && cleanItemNum && cleanNum === cleanItemNum && cleanGrade === cleanItemGrade && cleanRoom === cleanItemRoom) ||
-        (cleanName && cleanName === cleanItemName && cleanGrade === cleanItemGrade && cleanRoom === cleanItemRoom);
-
-      const sameAssignment = (s.assignmentId && item.assignmentId && s.assignmentId === item.assignmentId) ||
-        (cleanAssign && cleanAssign === cleanItemAssign);
-
-      return sameStudent && sameAssignment;
-    });
-  }, [submissions]);
-
-  // รายการที่มีการส่งซ้ำในผลการค้นหา/กรอง
-  const duplicateSubmissions = useMemo(() => {
-    return filteredSubmissions.filter(s => isDuplicateItem(s));
-  }, [filteredSubmissions, isDuplicateItem]);
-
-  // Delete submission (any submission or duplicate) - ลบออกจากทั้งเครื่องและฐานข้อมูล Google Sheet
-  const handleDeleteSubmission = async (item: Submission) => {
-    const isDup = isDuplicateItem(item);
-
-    const result = await Swal.fire({
-      title: isDup ? '🗑️ ลบงานที่ส่งซ้ำออกจากฐานข้อมูล?' : '🗑️ ยืนยันการลบผลงานออกจากฐานข้อมูล?',
-      html: `
-        <div class="text-left text-xs space-y-2.5">
-          <p class="font-bold text-gray-800 text-sm">ผลงาน: ${item.assignmentName}</p>
-          <div class="p-2.5 bg-purple-50 rounded-xl border border-purple-200 text-gray-700 space-y-1">
-            <p>🧑‍🎓 นักเรียน: <b>${item.studentName}</b> (เลขที่ ${item.studentNumber} ชั้น ${item.gradeLevel}/${item.room})</p>
-            <p>📚 วิชา: ${item.subjectCode} ${item.subjectName}</p>
-            <p>📅 ส่งเมื่อ: <b>${item.submittedAt}</b></p>
-            <p>🏷️ สถานะ: <span class="font-bold ${item.status === 'ตรวจแล้ว' ? 'text-emerald-700' : 'text-amber-700'}">${item.status}</span> ${item.score !== null ? `(${item.score}/${item.maxScore} คะแนน)` : ''}</p>
-          </div>
-          <p class="text-rose-700 bg-rose-50 p-2.5 rounded-xl border border-rose-200 font-semibold">
-            ⚠️ ระบบจะลบผลงานนี้ออกจากทั้งฐานข้อมูลและ Google Sheet อย่างถาวร ${isDup ? '(เพื่อลบรายการที่ส่งซ้ำออกให้เหลือชิ้นเดียว)' : '(สามารถส่งงานใหม่ได้ภายหลัง)'}
-          </p>
-        </div>
-      `,
-      icon: 'warning',
-      showCancelButton: true,
-      confirmButtonText: '🗑️ ยืนยันการลบออกจากฐานข้อมูล',
-      cancelButtonText: 'ยกเลิก',
-      confirmButtonColor: '#EF4444',
-      cancelButtonColor: '#6B7280',
-      customClass: {
-        popup: 'rounded-3xl font-[\'Kanit\',sans-serif]',
-        confirmButton: 'px-4 py-2.5 rounded-xl text-xs font-bold',
-        cancelButton: 'px-4 py-2.5 rounded-xl text-xs font-bold',
-      }
-    });
-
-    if (result.isConfirmed) {
-      alertService.loading('กำลังลบงานออกจากฐานข้อมูล...', 'ระบบกำลังลบข้อมูลออกจากเครื่องและ Google Sheet อย่างถาวร');
-      await storageService.deleteSubmission(item, sheetConfig);
-      if (onDataChange) onDataChange();
-      alertService.close();
-      if (viewingDetail?.id === item.id) {
-        setViewingDetail(null);
-      }
-      alertService.success('ลบข้อมูลออกจากฐานข้อมูลเรียบร้อยแล้ว ✨', `ลบผลงาน "${item.assignmentName}" ของ ${item.studentName} ออกจากระบบและ Google Sheet เรียบร้อยแล้ว`);
-    }
-  };
-
-  // ลบงานที่ส่งซ้ำทั้งหมดอัตโนมัติ โดยเก็บผลงานชิ้นที่ดีที่สุด/ล่าสุดไว้ 1 ชิ้น
-  const handleDeleteAllOlderDuplicates = async () => {
-    if (duplicateSubmissions.length === 0) return;
-
-    // จัดกลุ่มตามนักเรียนและงาน เพื่อหาชิ้นงานเก่าที่ต้องลบ (เก็บชิ้นล่าสุดไว้)
-    const groups = new Map<string, Submission[]>();
-    filteredSubmissions.forEach(s => {
-      const cleanName = stripThaiPrefix(s.studentName).toLowerCase();
-      const cleanNum = String(s.studentNumber || '').trim();
-      const cleanGrade = normalizeGradeLevel(s.gradeLevel);
-      const cleanRoom = normalizeRoom(s.room);
-      const cleanAssign = (s.assignmentName || '').trim().toLowerCase();
-      const groupKey = `${cleanName}_${cleanNum}_${cleanGrade}_${cleanRoom}_${cleanAssign}`;
-      if (!groups.has(groupKey)) {
-        groups.set(groupKey, []);
-      }
-      groups.get(groupKey)!.push(s);
-    });
-
-    const itemsToDelete: Submission[] = [];
-    groups.forEach(list => {
-      if (list.length > 1) {
-        // เรียง: ถ้ามีตรวจแล้วให้เก็บไว้ก่อน ตามด้วยใหม่ไปเก่า
-        const sorted = [...list].sort((a, b) => {
-          if (a.score !== null && b.score === null) return -1;
-          if (b.score !== null && a.score === null) return 1;
-          return (b.id || '').localeCompare(a.id || '');
-        });
-        const olderDups = sorted.slice(1);
-        itemsToDelete.push(...olderDups);
-      }
-    });
-
-    if (itemsToDelete.length === 0) {
-      alertService.info('ไม่พบรายการส่งซ้ำที่ต้องลบ');
-      return;
-    }
-
-    const confirm = await Swal.fire({
-      title: '🗑️ ลบงานส่งซ้ำออกจากฐานข้อมูล?',
-      html: `
-        <div class="text-left text-xs space-y-2.5">
-          <p>ระบบตรวจพบรายการส่งงานซ้ำจำนวน <b>${itemsToDelete.length}</b> รายการ</p>
-          <div class="text-violet-700 bg-violet-50 p-3 rounded-xl border border-violet-200 space-y-1">
-            <p class="font-bold">💡 สิ่งที่ระบบจะดำเนินการ:</p>
-            <p>• <b>เก็บผลงานที่ดีที่สุด/ล่าสุดไว้ 1 ชิ้น</b> สำหรับแต่ละงาน</p>
-            <p>• ลบรายการส่งซ้ำชิ้นอื่นๆ ออกจากทั้งระบบและ Google Sheet ทันที</p>
-          </div>
-        </div>
-      `,
-      icon: 'warning',
-      showCancelButton: true,
-      confirmButtonText: `🗑️ ยืนยันลบ ${itemsToDelete.length} รายการ`,
-      cancelButtonText: 'ยกเลิก',
-      confirmButtonColor: '#EF4444',
-      cancelButtonColor: '#6B7280',
-      customClass: {
-        popup: 'rounded-3xl font-[\'Kanit\',sans-serif]',
-        confirmButton: 'px-4 py-2.5 rounded-xl text-xs font-bold',
-        cancelButton: 'px-4 py-2.5 rounded-xl text-xs font-bold',
-      }
-    });
-
-    if (confirm.isConfirmed) {
-      alertService.loading('กำลังลบงานที่ส่งซ้ำ...', `ระบบกำลังลบข้อมูล ${itemsToDelete.length} รายการออกจากฐานข้อมูล`);
-      await storageService.deleteMultipleSubmissions(itemsToDelete, sheetConfig);
-      if (onDataChange) onDataChange();
-      alertService.close();
-      alertService.success('ลบงานส่งซ้ำเรียบร้อยแล้ว ✨', `ลบรายการส่งซ้ำจำนวน ${itemsToDelete.length} รายการออกจากฐานข้อมูลเรียบร้อยแล้ว`);
-    }
-  };
-
   // Quick Action to Submit a new work or pending work
   const handleQuickSubmit = (assignment?: Assignment) => {
     if (!onNavigateToSubmit) return;
@@ -658,7 +415,7 @@ export default function SubmissionStatusView({
                 <span>✨</span>
               </h1>
               <p className="text-xs md:text-sm text-gray-500 mt-1 flex items-center gap-1.5">
-                <span>เช็คคะแนน แก้ไขงาน ลบงาน และตรวจดูว่ามีวิชาไหนค้างส่งงานใดบ้าง 🌸</span>
+                <span>เช็คคะแนน สถานะการตรวจงาน และตรวจดูว่ามีวิชาไหนค้างส่งงานใดบ้าง 🌸</span>
               </p>
             </div>
           </div>
@@ -1187,7 +944,7 @@ export default function SubmissionStatusView({
                     <span className="text-xs text-purple-600 font-medium">({studentTotalCount} ชิ้นงาน)</span>
                   </div>
                   <span className="text-xs text-gray-500">
-                    💡 คลิกปุ่ม <span className="font-bold text-violet-700">✏️ แก้ไข</span> เพื่อแก้ไขข้อมูลหรือเปลี่ยนลิงก์งาน | <span className="font-bold text-rose-600">🗑️ ลบ</span> เพื่อนำงานออก
+                    💡 คลิกปุ่ม <span className="font-bold text-violet-700">👁️ ดูข้อมูล</span> เพื่อดูรายละเอียดคะแนนและคำแนะนำจากคุณครู
                   </span>
                 </div>
               )}
@@ -1347,35 +1104,16 @@ export default function SubmissionStatusView({
                             </a>
                           </td>
 
-                          {/* การจัดการ (ดูข้อมูล / แก้ไขงาน / ลบงาน) */}
+                          {/* การจัดการ (ดูข้อมูล) */}
                           <td className="py-4 px-4 text-center">
-                            <div className="flex items-center justify-center gap-1.5">
+                            <div className="flex items-center justify-center">
                               {/* 👁️ ดูข้อมูล */}
                               <button
                                 onClick={() => setViewingDetail(item)}
-                                className="px-2.5 py-1.5 rounded-xl text-xs font-semibold text-violet-700 bg-violet-50 hover:bg-violet-100 border border-purple-200 transition-colors cursor-pointer"
+                                className="px-3 py-1.5 rounded-xl text-xs font-semibold text-violet-700 bg-violet-50 hover:bg-violet-100 border border-purple-200 transition-colors cursor-pointer"
                                 title="ดูรายละเอียดคะแนนและคำแนะนำ"
                               >
                                 👁️ ดูข้อมูล
-                              </button>
-
-                              {/* ✏️ แก้ไขงาน */}
-                              <button
-                                onClick={() => handleOpenEdit(item)}
-                                className="px-2.5 py-1.5 rounded-xl text-xs font-bold text-amber-800 bg-amber-50 hover:bg-amber-100 border border-amber-200 transition-colors cursor-pointer flex items-center gap-1 shadow-2xs"
-                                title="แก้ไขชื่อ เลขที่ หรือเปลี่ยนลิงก์งานที่ส่ง"
-                              >
-                                <Edit3 size={12} />
-                                <span>แก้ไข</span>
-                              </button>
-
-                              {/* 🗑️ ลบงาน */}
-                              <button
-                                onClick={() => handleDeleteSubmission(item)}
-                                className="p-1.5 text-gray-400 hover:text-rose-600 hover:bg-rose-50 rounded-xl border border-transparent hover:border-rose-200 transition-colors cursor-pointer"
-                                title="ลบผลงานนี้ออกจากระบบ"
-                              >
-                                <Trash2 size={13} />
                               </button>
                             </div>
                           </td>
@@ -1847,30 +1585,6 @@ export default function SubmissionStatusView({
                 <ExternalLink size={14} /> เปิดดูไฟล์งานที่ส่ง
               </a>
 
-              {/* Edit Button */}
-              <button
-                type="button"
-                onClick={() => {
-                  const target = viewingDetail;
-                  setViewingDetail(null);
-                  handleOpenEdit(target);
-                }}
-                className="px-4 py-3 bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-300 rounded-xl text-xs font-bold cursor-pointer transition-colors flex items-center justify-center gap-1.5"
-              >
-                <Edit3 size={13} />
-                <span>แก้ไขงาน</span>
-              </button>
-
-              {/* Delete Button */}
-              <button
-                type="button"
-                onClick={() => handleDeleteSubmission(viewingDetail)}
-                className="px-4 py-3 bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 rounded-xl text-xs font-bold cursor-pointer transition-colors flex items-center justify-center gap-1.5"
-              >
-                <Trash2 size={13} />
-                <span>ลบงาน</span>
-              </button>
-
               <button
                 onClick={() => setViewingDetail(null)}
                 className="px-4 py-3 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-xl text-xs font-bold cursor-pointer"
@@ -1878,145 +1592,6 @@ export default function SubmissionStatusView({
                 ปิด
               </button>
             </div>
-          </div>
-        </div>
-      )}
-
-      {/* EDIT MODAL: นักเรียนแก้ไขข้อมูลและผลงานที่ส่ง (STUDENT EDIT MODAL) */}
-      {editingSubmission && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-fade-in">
-          <div className="bg-white rounded-3xl max-w-md w-full p-6 shadow-2xl border border-purple-200 space-y-5">
-            {/* Modal Header */}
-            <div className="flex items-center justify-between border-b border-purple-100 pb-3">
-              <div className="flex items-center gap-2.5">
-                <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-amber-400 to-yellow-500 text-white flex items-center justify-center text-lg font-bold shadow-md shadow-amber-200">
-                  ✏️
-                </div>
-                <div>
-                  <h3 className="text-base font-bold text-gray-900">แก้ไขผลงานที่ส่ง</h3>
-                  <p className="text-xs text-gray-500 truncate max-w-xs">{editingSubmission.assignmentName}</p>
-                </div>
-              </div>
-              <button
-                type="button"
-                onClick={() => setEditingSubmission(null)}
-                className="w-8 h-8 rounded-full bg-gray-100 hover:bg-gray-200 text-gray-600 flex items-center justify-center text-sm font-bold cursor-pointer transition-colors"
-              >
-                ✕
-              </button>
-            </div>
-
-            {/* Edit Form */}
-            <form onSubmit={handleSaveEdit} className="space-y-4">
-              {/* ชื่อ-นามสกุล */}
-              <div>
-                <label className="block text-xs font-bold text-gray-700 mb-1 flex items-center gap-1">
-                  <User size={13} className="text-violet-600" />
-                  <span>ชื่อและนามสกุล ผู้ส่งงาน</span>
-                  <span className="text-rose-500">*</span>
-                </label>
-                <input
-                  type="text"
-                  required
-                  value={editStudentName}
-                  onChange={(e) => setEditStudentName(e.target.value)}
-                  placeholder="เช่น ด.ช. ภูริพัฒน์ วงศ์สว่าง"
-                  className="w-full px-3.5 py-2.5 bg-purple-50/20 border border-purple-200 rounded-xl text-sm text-gray-800 focus:bg-white focus:outline-none focus:ring-2 focus:ring-purple-300"
-                />
-              </div>
-
-              {/* เลขที่ ชั้น ห้อง */}
-              <div className="grid grid-cols-3 gap-2.5">
-                <div>
-                  <label className="block text-xs font-bold text-gray-700 mb-1 flex items-center gap-1">
-                    <Hash size={13} className="text-violet-600" />
-                    <span>เลขที่</span>
-                    <span className="text-rose-500">*</span>
-                  </label>
-                  <input
-                    type="number"
-                    min="1"
-                    max="60"
-                    required
-                    value={editStudentNumber}
-                    onChange={(e) => setEditStudentNumber(e.target.value)}
-                    className="w-full px-2.5 py-2 bg-purple-50/20 border border-purple-200 rounded-xl text-sm font-bold text-center text-gray-800 focus:bg-white focus:outline-none focus:ring-2 focus:ring-purple-300"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-xs font-bold text-gray-700 mb-1">
-                    ระดับชั้น <span className="text-rose-500">*</span>
-                  </label>
-                  <select
-                    value={editGradeLevel}
-                    onChange={(e) => setEditGradeLevel(e.target.value as GradeLevel)}
-                    className="w-full px-2 py-2 bg-purple-50/20 border border-purple-200 rounded-xl text-xs font-semibold cursor-pointer focus:bg-white focus:outline-none focus:ring-2 focus:ring-purple-300"
-                  >
-                    {GRADE_LEVELS.map(g => (
-                      <option key={g} value={g}>{g}</option>
-                    ))}
-                  </select>
-                </div>
-
-                <div>
-                  <label className="block text-xs font-bold text-gray-700 mb-1">
-                    ห้อง <span className="text-rose-500">*</span>
-                  </label>
-                  <select
-                    value={editRoom}
-                    onChange={(e) => setEditRoom(e.target.value)}
-                    className="w-full px-2 py-2 bg-purple-50/20 border border-purple-200 rounded-xl text-xs font-semibold cursor-pointer focus:bg-white focus:outline-none focus:ring-2 focus:ring-purple-300"
-                  >
-                    {ROOMS.map(r => (
-                      <option key={r} value={r}>ห้อง {r}</option>
-                    ))}
-                  </select>
-                </div>
-              </div>
-
-              {/* แนบลิงก์งาน (URL) */}
-              <div>
-                <label className="block text-xs font-bold text-gray-700 mb-1 flex items-center justify-between">
-                  <span className="flex items-center gap-1">
-                    <ExternalLink size={13} className="text-violet-600" />
-                    <span>แนบลิงก์ผลงานใหม่ (URL)</span>
-                    <span className="text-rose-500">*</span>
-                  </span>
-                  <span className="text-[10px] text-gray-400">Google Drive / Canva / YouTube / Docs</span>
-                </label>
-                <input
-                  type="url"
-                  required
-                  value={editWorkUrl}
-                  onChange={(e) => setEditWorkUrl(e.target.value)}
-                  placeholder="https://drive.google.com/... หรือ ลิงก์ชิ้นงาน"
-                  className="w-full px-3.5 py-2.5 bg-purple-50/20 border border-purple-200 rounded-xl text-xs font-mono text-gray-800 focus:bg-white focus:outline-none focus:ring-2 focus:ring-purple-300"
-                />
-                <p className="text-[10px] text-gray-500 mt-1">
-                  💡 หากเป็น Google Drive โปรดตั้งค่าเป็น <b>"ทุกคนที่มีลิงก์มีสิทธิ์ดู"</b> เพื่อให้คุณครูตรวจได้
-                </p>
-              </div>
-
-              {/* Action Buttons */}
-              <div className="flex items-center justify-end gap-2.5 pt-3 border-t border-purple-100">
-                <button
-                  type="button"
-                  onClick={() => setEditingSubmission(null)}
-                  className="px-4 py-2.5 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-xl text-xs font-semibold transition-colors cursor-pointer"
-                >
-                  ยกเลิก
-                </button>
-                <button
-                  type="submit"
-                  disabled={isSavingEdit}
-                  className="px-5 py-2.5 bg-gradient-to-r from-violet-600 via-indigo-600 to-purple-600 hover:from-violet-700 hover:to-indigo-700 text-white rounded-xl text-xs font-bold shadow-md shadow-violet-200 transition-all cursor-pointer flex items-center gap-1.5"
-                >
-                  <Save size={14} />
-                  <span>{isSavingEdit ? 'กำลังบันทึก...' : 'บันทึกการแก้ไข ✨'}</span>
-                </button>
-              </div>
-            </form>
           </div>
         </div>
       )}

@@ -52,10 +52,11 @@ import {
   Copy,
   Check,
   Zap,
+  RefreshCw,
 } from 'lucide-react';
 import Swal from 'sweetalert2';
 import { Teacher, Assignment, Submission, AssignmentItem, Subject, GoogleSheetConfig, GradeLevel, StudentRosterItem } from '../types';
-import { DEPARTMENTS, GRADE_LEVELS, ROOMS, ACADEMIC_YEARS, SEMESTERS, WORK_TYPES } from '../constants';
+import { DEPARTMENTS, GRADE_LEVELS, ROOMS, SEMESTERS, WORK_TYPES } from '../constants';
 import { storageService, normalizeRoom, normalizeGradeLevel, stripThaiPrefix } from '../services/storageService';
 import { alertService } from '../services/alertService';
 import { aiEvaluationService, AiEvaluationResult } from '../services/aiEvaluationService';
@@ -121,7 +122,18 @@ export default function TeacherPortalView({
   const [isManageSubjectsOpen, setIsManageSubjectsOpen] = useState(false);
   const [newSubjCode, setNewSubjCode] = useState('');
   const [newSubjName, setNewSubjName] = useState('');
-  const [editingSubject, setEditingSubject] = useState<{ oldCode: string; code: string; name: string } | null>(null);
+  const [newSubjYear, setNewSubjYear] = useState('2569');
+  const [newSubjSemester, setNewSubjSemester] = useState('2');
+  const [subjFilterYear, setSubjFilterYear] = useState<string>('ALL');
+  const [subjFilterSemester, setSubjFilterSemester] = useState<string>('ALL');
+  const [editingSubject, setEditingSubject] = useState<{
+    oldCode: string;
+    code: string;
+    name: string;
+    academicYear: string;
+    semester: string;
+  } | null>(null);
+  const [isSyncingSheet, setIsSyncingSheet] = useState(false);
 
   // Student Roster from Excel Uploads (Declared early for use in teacherAcademicYears computation)
   const [rosterList, setRosterList] = useState<StudentRosterItem[]>(() => storageService.getStudentRoster());
@@ -190,15 +202,49 @@ export default function TeacherPortalView({
     return uniqueSems.length > 0 ? uniqueSems : ['1', '2'];
   }, [assignments, submissions, subjects, rosterList, activeTeacher]);
 
-  // คำนวณปีการศึกษาและภาคเรียนล่าสุดของครูผู้สอนท่านนี้ (จากข้อมูลจริงที่ครูใส่ในระบบ ไม่ใช้ค่าฮาร์ดโค้ด 2568)
+  // คำนวณปีการศึกษาและภาคเรียนล่าสุดของครูผู้สอนท่านนี้ (จากข้อมูลจริงที่ครูใส่ในระบบ/Sheet)
   const { latestYear, latestSemester } = useMemo(() => {
-    const bestYear = teacherAcademicYears.length > 0 ? teacherAcademicYears[0] : '';
-    const bestSem = teacherSemesters.length > 0 ? teacherSemesters[teacherSemesters.length - 1] : '1';
+    const bestYear = teacherAcademicYears.length > 0 ? teacherAcademicYears[0] : '2569';
+    const bestSem = teacherSemesters.length > 0 ? teacherSemesters[teacherSemesters.length - 1] : '2';
     return { latestYear: bestYear, latestSemester: bestSem };
   }, [teacherAcademicYears, teacherSemesters]);
 
+  // รายการปีการศึกษาและภาคเรียนทั้งหมดที่มีอยู่ใน Google Sheet และระบบ (เรียงจากปีล่าสุดลงไป)
+  const sheetAcademicYears = useMemo(() => {
+    const yearsFromData = [
+      ...submissions.map(s => s.academicYear?.trim()),
+      ...assignments.map(a => a.academicYear?.trim()),
+      ...subjects.map(s => s.academicYear?.trim()),
+      ...rosterList.map(r => r.academicYear?.trim()),
+    ].filter((y): y is string => Boolean(y && y.length > 0));
+
+    const combined = Array.from(new Set([...yearsFromData, '2569']));
+    return combined.sort((a, b) => (parseInt(b, 10) || 0) - (parseInt(a, 10) || 0));
+  }, [submissions, assignments, subjects, rosterList]);
+
+  const sheetDataYearSet = useMemo(() => {
+    return new Set(
+      [
+        ...submissions.map(s => s.academicYear?.trim()),
+        ...assignments.map(a => a.academicYear?.trim()),
+        ...subjects.map(s => s.academicYear?.trim()),
+      ].filter((y): y is string => Boolean(y && y.length > 0))
+    );
+  }, [submissions, assignments, subjects]);
+
+  const sheetSemesters = useMemo(() => {
+    const semsFromData = [
+      ...submissions.map(s => s.semester?.trim()),
+      ...assignments.map(a => a.semester?.trim()),
+      ...subjects.map(s => s.semester?.trim()),
+      ...rosterList.map(r => r.semester?.trim()),
+    ].filter((s): s is string => Boolean(s && s.length > 0));
+
+    return Array.from(new Set([...semsFromData, '1', '2'])).sort((a, b) => (parseInt(a, 10) || 99) - (parseInt(b, 10) || 99));
+  }, [submissions, assignments, subjects, rosterList]);
+
   // รายการปีการศึกษาที่สามารถเลือกได้
-  const availableAcademicYears = teacherAcademicYears;
+  const availableAcademicYears = teacherAcademicYears.length > 0 ? teacherAcademicYears : sheetAcademicYears;
 
   // รายวิชาที่ครูท่านนี้สอน ที่นำข้อมูลเข้า หรือมีนักเรียนส่งงาน
   const teacherSubjects = useMemo(() => {
@@ -224,11 +270,11 @@ export default function TeacherPortalView({
         }
       });
 
-    // 3. จากวิชาที่ลงทะเบียนของครูท่านนี้
+    // 3. จากวิชาที่ลงทะเบียนของครูท่านนี้ หรือดึงมาจาก Sheet
     subjects
       .filter(s => !s.teacherName || !activeTeacher || matchesTeacher(s.teacherName, activeTeacher.fullName))
       .forEach(s => {
-        if (s.code && (!activeTeacher || matchesTeacher(s.teacherName, activeTeacher.fullName))) {
+        if (s.code) {
           unique.set(s.code, `${s.code} ${s.name || ''}`.trim());
         }
       });
@@ -387,11 +433,14 @@ export default function TeacherPortalView({
   const [importSelectedAssignmentId, setImportSelectedAssignmentId] = useState<string>('');
   const [isImporting, setIsImporting] = useState<boolean>(false);
 
-  // Add Assignment form states
+  // Add Assignment form states & list filters
   const [subjectCode, setSubjectCode] = useState('');
   const [subjectName, setSubjectName] = useState('');
-  const [assignYear, setAssignYear] = useState(latestYear);
-  const [assignSemester, setAssignSemester] = useState(latestSemester);
+  const [assignYear, setAssignYear] = useState(latestYear || '2569');
+  const [assignSemester, setAssignSemester] = useState(latestSemester || '2');
+  const [assignListYearFilter, setAssignListYearFilter] = useState<string>('ALL');
+  const [assignListSemFilter, setAssignListSemFilter] = useState<string>('ALL');
+  const [assignListSubjFilter, setAssignListSubjFilter] = useState<string>('ALL');
   const [assignmentItems, setAssignmentItems] = useState<AssignmentItem[]>([
     { 
       id: '1', 
@@ -407,6 +456,7 @@ export default function TeacherPortalView({
   const [filterYear, setFilterYear] = useState<string>(latestYear);
   const [filterSemester, setFilterSemester] = useState<string>(latestSemester);
   const [filterSubject, setFilterSubject] = useState<string>('ALL');
+  const [filterAssignment, setFilterAssignment] = useState<string>('ALL');
   const [filterGrade, setFilterGrade] = useState<string>('ALL');
   const [filterRoom, setFilterRoom] = useState<string>('ALL');
   const [filterStatus, setFilterStatus] = useState<string>('ALL');
@@ -438,13 +488,24 @@ export default function TeacherPortalView({
   // Inline grading inputs: mapping submissionId -> { score, feedback }
   const [gradingScores, setGradingScores] = useState<Record<string, { score: string; feedback: string }>>({});
 
-  // Custom AI Grading Criteria (teacher-defined rubric, persisted in localStorage)
+  // Custom AI Grading Criteria (teacher-defined rubric, persisted in localStorage globally & per-assignment)
   const criteriaStorageKey = `teacher_custom_ai_criteria_${activeTeacher?.id || 'default'}`;
+  const assignmentCriteriaStorageKey = `teacher_ai_assignment_criteria_${activeTeacher?.id || 'default'}`;
+
   const [customAiCriteria, setCustomAiCriteria] = useState<string>(() => {
     try {
       return localStorage.getItem(`teacher_custom_ai_criteria_${activeTeacher?.id || 'default'}`) || '';
     } catch {
       return '';
+    }
+  });
+
+  const [assignmentCriteriaMap, setAssignmentCriteriaMap] = useState<Record<string, string>>(() => {
+    try {
+      const raw = localStorage.getItem(`teacher_ai_assignment_criteria_${activeTeacher?.id || 'default'}`);
+      return raw ? JSON.parse(raw) : {};
+    } catch {
+      return {};
     }
   });
 
@@ -454,18 +515,195 @@ export default function TeacherPortalView({
       if (saved !== null) {
         setCustomAiCriteria(saved);
       }
+      const savedMap = localStorage.getItem(assignmentCriteriaStorageKey);
+      setAssignmentCriteriaMap(savedMap ? JSON.parse(savedMap) : {});
     } catch {
       // ignore storage errors
     }
-  }, [criteriaStorageKey]);
+  }, [criteriaStorageKey, assignmentCriteriaStorageKey]);
+
+  const buildCriteriaMapKey = (subjectCode: string, assignmentTitle: string) =>
+    `${(subjectCode || 'ALL').trim()}::${assignmentTitle.trim()}`;
+
+  // Available assignments/worksheets for the selected subject/year/semester in AI Auto-Grader & Grading
+  const gradingAssignmentOptions = useMemo(() => {
+    const map = new Map<string, {
+      key: string;
+      id?: string;
+      title: string;
+      subjectCode: string;
+      subjectName: string;
+      maxScore: number;
+      workType?: string;
+      rubricCriteria?: string;
+    }>();
+
+    assignments
+      .filter(a => {
+        const matchTeacher = !activeTeacher || matchesTeacher(a.teacherName, activeTeacher.fullName);
+        const matchYear = filterYear === 'ALL' || !a.academicYear || a.academicYear === filterYear;
+        const matchSem = filterSemester === 'ALL' || !a.semester || a.semester === filterSemester;
+        const matchSub = filterSubject === 'ALL' || a.subjectCode === filterSubject || a.subjectName === filterSubject;
+        return matchTeacher && matchYear && matchSem && matchSub;
+      })
+      .forEach(a => {
+        const title = a.title.trim();
+        if (!title) return;
+        const key = `${a.subjectCode || ''}::${title}`;
+        map.set(key, {
+          key,
+          id: a.id,
+          title,
+          subjectCode: a.subjectCode,
+          subjectName: a.subjectName,
+          maxScore: a.maxScore,
+          workType: a.workType,
+          rubricCriteria: a.rubricCriteria,
+        });
+      });
+
+    // Also include distinct assignment names from submissions if not yet in assignments list
+    submissions
+      .filter(s => {
+        const matchTeacher = !activeTeacher || matchesTeacher(s.teacherName, activeTeacher.fullName) || (s.subjectCode && teacherSubjects.some(([code]) => code === s.subjectCode));
+        const matchYear = filterYear === 'ALL' || !s.academicYear || s.academicYear === filterYear;
+        const matchSem = filterSemester === 'ALL' || !s.semester || s.semester === filterSemester;
+        const matchSub = filterSubject === 'ALL' || s.subjectCode === filterSubject || s.subjectName === filterSubject;
+        return matchTeacher && matchYear && matchSem && matchSub;
+      })
+      .forEach(s => {
+        const title = s.assignmentName.trim();
+        if (!title) return;
+        const key = `${s.subjectCode || ''}::${title}`;
+        if (!map.has(key)) {
+          map.set(key, {
+            key,
+            title,
+            subjectCode: s.subjectCode,
+            subjectName: s.subjectName,
+            maxScore: s.maxScore || 10,
+            workType: s.workType,
+          });
+        }
+      });
+
+    return Array.from(map.values()).sort((a, b) => a.title.localeCompare(b.title, 'th'));
+  }, [assignments, submissions, activeTeacher, teacherSubjects, filterYear, filterSemester, filterSubject]);
 
   const handleCustomAiCriteriaChange = (value: string) => {
     setCustomAiCriteria(value);
     try {
-      localStorage.setItem(criteriaStorageKey, value);
+      if (filterAssignment !== 'ALL') {
+        const opt = gradingAssignmentOptions.find(o => o.title === filterAssignment);
+        const mapKey = buildCriteriaMapKey(opt?.subjectCode || filterSubject, filterAssignment);
+        const nextMap = { ...assignmentCriteriaMap };
+        if (value.trim()) {
+          nextMap[mapKey] = value;
+        } else {
+          delete nextMap[mapKey];
+        }
+        setAssignmentCriteriaMap(nextMap);
+        localStorage.setItem(assignmentCriteriaStorageKey, JSON.stringify(nextMap));
+      } else {
+        localStorage.setItem(criteriaStorageKey, value);
+      }
     } catch {
       // ignore storage errors
     }
+  };
+
+  const handleAiSubjectChange = (newSubject: string) => {
+    setFilterSubject(newSubject);
+    setFilterAssignment('ALL');
+    try {
+      const globalSaved = localStorage.getItem(criteriaStorageKey) || '';
+      setCustomAiCriteria(globalSaved);
+    } catch {
+      setCustomAiCriteria('');
+    }
+  };
+
+  const handleAiAssignmentChange = (assignmentTitle: string) => {
+    setFilterAssignment(assignmentTitle);
+    if (assignmentTitle === 'ALL') {
+      try {
+        const globalSaved = localStorage.getItem(criteriaStorageKey) || '';
+        setCustomAiCriteria(globalSaved);
+      } catch {
+        setCustomAiCriteria('');
+      }
+      return;
+    }
+
+    const opt = gradingAssignmentOptions.find(o => o.title === assignmentTitle);
+    const subjKey = opt?.subjectCode || filterSubject;
+    const savedForAssignment =
+      assignmentCriteriaMap[buildCriteriaMapKey(subjKey, assignmentTitle)] ||
+      assignmentCriteriaMap[buildCriteriaMapKey('ALL', assignmentTitle)] ||
+      opt?.rubricCriteria ||
+      '';
+    setCustomAiCriteria(savedForAssignment);
+  };
+
+  const handleSaveCriteriaToAssignment = async () => {
+    if (filterAssignment === 'ALL') {
+      try {
+        localStorage.setItem(criteriaStorageKey, customAiCriteria);
+      } catch {
+        // ignore
+      }
+      Swal.fire({
+        toast: true,
+        position: 'top-end',
+        icon: 'success',
+        title: '💾 บันทึกเกณฑ์ AI เรียบร้อยแล้ว',
+        showConfirmButton: false,
+        timer: 1800,
+      });
+      return;
+    }
+
+    const opt = gradingAssignmentOptions.find(o => o.title === filterAssignment);
+    const subjKey = opt?.subjectCode || filterSubject;
+    const mapKey = buildCriteriaMapKey(subjKey, filterAssignment);
+    const nextMap = { ...assignmentCriteriaMap };
+    if (customAiCriteria.trim()) {
+      nextMap[mapKey] = customAiCriteria.trim();
+    } else {
+      delete nextMap[mapKey];
+    }
+    setAssignmentCriteriaMap(nextMap);
+    try {
+      localStorage.setItem(assignmentCriteriaStorageKey, JSON.stringify(nextMap));
+    } catch {
+      // ignore
+    }
+
+    const matchedAssignment = assignments.find(
+      a =>
+        a.title.trim() === filterAssignment.trim() &&
+        (filterSubject === 'ALL' || a.subjectCode === filterSubject || a.subjectName === filterSubject)
+    );
+
+    if (matchedAssignment) {
+      await storageService.updateAssignment(
+        {
+          ...matchedAssignment,
+          rubricCriteria: customAiCriteria.trim() || undefined,
+        },
+        sheetConfig
+      );
+      onAssignmentsChange();
+    }
+
+    Swal.fire({
+      toast: true,
+      position: 'top-end',
+      icon: 'success',
+      title: `💾 บันทึกเกณฑ์ลงใบงาน "${filterAssignment}" แล้ว`,
+      showConfirmButton: false,
+      timer: 2200,
+    });
   };
 
   // Resolve assignment rubric criteria for a given submission
@@ -476,6 +714,21 @@ export default function TeacherPortalView({
         (!sub.subjectCode || a.subjectCode.trim() === sub.subjectCode.trim())
     );
     return matched?.rubricCriteria?.trim() || undefined;
+  };
+
+  // Resolve final custom AI criteria for a submission (per-assignment saved criteria -> active box -> global)
+  const resolveCustomAiCriteriaForSubmission = (sub: Submission): string | undefined => {
+    const perAssign =
+      assignmentCriteriaMap[buildCriteriaMapKey(sub.subjectCode || 'ALL', sub.assignmentName)] ||
+      assignmentCriteriaMap[buildCriteriaMapKey('ALL', sub.assignmentName)];
+    if (perAssign && perAssign.trim()) return perAssign.trim();
+    if (filterAssignment !== 'ALL' && sub.assignmentName.trim() === filterAssignment.trim()) {
+      return customAiCriteria.trim() || undefined;
+    }
+    if (filterAssignment === 'ALL' && customAiCriteria.trim()) {
+      return customAiCriteria.trim();
+    }
+    return undefined;
   };
 
   // AI Evaluation modal states
@@ -765,6 +1018,27 @@ export default function TeacherPortalView({
     setSubjects(list);
   };
 
+  const handleSyncSheetNow = async () => {
+    try {
+      setIsSyncingSheet(true);
+      await onRefreshData();
+      refreshSubjects();
+      setRosterList(storageService.getStudentRoster());
+      Swal.fire({
+        toast: true,
+        position: 'top-end',
+        icon: 'success',
+        title: '🔄 ดึงข้อมูลปีการศึกษา ภาคเรียน วิชา และใบงานจาก Google Sheet แล้ว',
+        showConfirmButton: false,
+        timer: 2200,
+      });
+    } catch {
+      alertService.error('ซิงค์ข้อมูลไม่สำเร็จ', 'โปรดตรวจสอบการเชื่อมต่ออินเทอร์เน็ตหรือ URL ของ Google Sheet');
+    } finally {
+      setIsSyncingSheet(false);
+    }
+  };
+
   const handleSelectSubjectChange = (val: string) => {
     setSelectedSubjectSelect(val);
     if (val === '__MANAGE__') {
@@ -775,6 +1049,8 @@ export default function TeacherPortalView({
     if (found) {
       setSubjectCode(found.code);
       setSubjectName(found.name);
+      if (found.academicYear) setAssignYear(found.academicYear);
+      if (found.semester) setAssignSemester(found.semester);
     } else {
       setSubjectCode('');
       setSubjectName('');
@@ -792,14 +1068,16 @@ export default function TeacherPortalView({
       code: newSubjCode.trim(),
       name: newSubjName.trim(),
       teacherName: activeTeacher?.fullName,
-      academicYear: assignYear,
-      semester: assignSemester,
+      academicYear: newSubjYear.trim() || assignYear || '2569',
+      semester: newSubjSemester.trim() || assignSemester || '2',
     }, sheetConfig);
 
     if (res.success && res.subject) {
       refreshSubjects();
       setSubjectCode(res.subject.code);
       setSubjectName(res.subject.name);
+      if (res.subject.academicYear) setAssignYear(res.subject.academicYear);
+      if (res.subject.semester) setAssignSemester(res.subject.semester);
       setSelectedSubjectSelect(res.subject.code);
       setNewSubjCode('');
       setNewSubjName('');
@@ -821,7 +1099,12 @@ export default function TeacherPortalView({
     alertService.loading('กำลังบันทึกการแก้ไขวิชา...', 'กำลังอัปเดตข้อมูลวิชาในระบบและ Google Sheet');
     const res = await storageService.updateSubject(
       editingSubject.oldCode,
-      { code: editingSubject.code.trim(), name: editingSubject.name.trim() },
+      {
+        code: editingSubject.code.trim(),
+        name: editingSubject.name.trim(),
+        academicYear: editingSubject.academicYear.trim(),
+        semester: editingSubject.semester.trim(),
+      },
       sheetConfig
     );
     alertService.close();
@@ -831,6 +1114,8 @@ export default function TeacherPortalView({
       if (subjectCode === editingSubject.oldCode) {
         setSubjectCode(editingSubject.code.trim());
         setSubjectName(editingSubject.name.trim());
+        if (editingSubject.academicYear.trim()) setAssignYear(editingSubject.academicYear.trim());
+        if (editingSubject.semester.trim()) setAssignSemester(editingSubject.semester.trim());
         setSelectedSubjectSelect(editingSubject.code.trim());
       }
       setEditingSubject(null);
@@ -969,7 +1254,7 @@ export default function TeacherPortalView({
         maxScore: sub.maxScore,
         sampleUrl: sub.sampleUrl,
         rubricCriteria: getAssignmentRubric(sub),
-        customAiCriteria: customAiCriteria.trim() || undefined,
+        customAiCriteria: resolveCustomAiCriteriaForSubmission(sub),
         studentName: sub.studentName,
         workUrl: sub.workUrl,
         studentNumber: sub.studentNumber,
@@ -1486,13 +1771,16 @@ export default function TeacherPortalView({
       const subSemester = (s.semester && s.semester.trim()) || '';
       const matchSemester = filterSemester === 'ALL' || !subSemester || subSemester === filterSemester;
 
-      // 3. Subject match
+      // 3. Subject & Assignment match
       const matchSubject = filterSubject === 'ALL' ||
         s.subjectCode === filterSubject ||
         s.subjectName === filterSubject ||
         (s.subjectCode && filterSubject.includes(s.subjectCode)) ||
         (filterSubject && s.subjectCode && filterSubject.includes(s.subjectCode)) ||
         (s.subjectName && filterSubject.includes(s.subjectName));
+
+      const matchAssignment = filterAssignment === 'ALL' ||
+        s.assignmentName.trim() === filterAssignment.trim();
 
       // 4. Grade & Room match with normalization
       const matchGrade = filterGrade === 'ALL' || normalizeGradeLevel(s.gradeLevel) === normalizeGradeLevel(filterGrade);
@@ -1518,9 +1806,9 @@ export default function TeacherPortalView({
         (s.subjectName && s.subjectName.toLowerCase().includes(q))
       );
 
-      return matchTeacher && matchYear && matchSemester && matchSubject && matchGrade && matchRoom && matchStatus && matchAi && matchQuery;
+      return matchTeacher && matchYear && matchSemester && matchSubject && matchAssignment && matchGrade && matchRoom && matchStatus && matchAi && matchQuery;
     });
-  }, [submissions, activeTeacher, teacherSubjects, filterYear, filterSemester, filterSubject, filterGrade, filterRoom, filterStatus, filterAiStatus, gradingSearch]);
+  }, [submissions, activeTeacher, teacherSubjects, filterYear, filterSemester, filterSubject, filterAssignment, filterGrade, filterRoom, filterStatus, filterAiStatus, gradingSearch]);
 
   // Reference for scrolling to results when user clicks Search
   const gradingResultsRef = useRef<HTMLDivElement>(null);
@@ -1590,13 +1878,17 @@ export default function TeacherPortalView({
   const gradingUnifiedItems = useMemo(() => {
     if (filterRoom === 'ALL' || gradingRoomStudents.length === 0) return [];
 
-    const defaultAssignment = assignments.find(a => 
+    const defaultAssignment = assignments.find(a =>
+      (!activeTeacher || matchesTeacher(a.teacherName, activeTeacher.fullName)) &&
+      (filterSubject === 'ALL' || a.subjectCode === filterSubject) &&
+      (filterAssignment === 'ALL' || a.title.trim() === filterAssignment.trim())
+    ) || assignments.find(a =>
       (!activeTeacher || matchesTeacher(a.teacherName, activeTeacher.fullName)) &&
       (filterSubject === 'ALL' || a.subjectCode === filterSubject)
     ) || assignments[0];
 
     const defaultMaxScore = defaultAssignment?.maxScore || 10;
-    const defaultAssignTitle = defaultAssignment?.title || 'งานที่ได้รับมอบหมาย';
+    const defaultAssignTitle = filterAssignment !== 'ALL' ? filterAssignment : (defaultAssignment?.title || 'งานที่ได้รับมอบหมาย');
 
     const items = gradingRoomStudents.map(student => {
       const matched = teacherSubmissions.find(s => {
@@ -1666,7 +1958,7 @@ export default function TeacherPortalView({
 
       return true;
     });
-  }, [filterRoom, gradingRoomStudents, teacherSubmissions, assignments, activeTeacher, filterSubject, filterStatus, filterAiStatus, gradingSearch]);
+  }, [filterRoom, gradingRoomStudents, teacherSubmissions, assignments, activeTeacher, filterSubject, filterAssignment, filterStatus, filterAiStatus, gradingSearch]);
 
   // สถิติห้องเรียนในหน้าตรวจงาน
   const gradingRoomStats = useMemo(() => {
@@ -1789,6 +2081,7 @@ export default function TeacherPortalView({
     setFilterYear('ALL');
     setFilterSemester('ALL');
     setFilterSubject('ALL');
+    setFilterAssignment('ALL');
     setFilterGrade('ALL');
     setFilterRoom('ALL');
     setFilterStatus('ALL');
@@ -1826,6 +2119,8 @@ export default function TeacherPortalView({
           <p class="font-medium text-gray-800">ระบบ AI จะวิเคราะห์ผลงานและให้คะแนนตามเกณฑ์ของนักเรียนทุกคนที่ส่งงานมา</p>
           <div class="bg-violet-50 p-3 rounded-xl border border-violet-200 text-xs space-y-1">
             <p>• จำนวนผลงานที่จะประเมิน: <b class="text-violet-700 font-bold">${targets.length}</b> ชิ้นงาน</p>
+            ${filterSubject !== 'ALL' ? `<p>• วิชาที่เลือก: <span class="font-semibold text-gray-800">${filterSubject}</span></p>` : ''}
+            ${filterAssignment !== 'ALL' ? `<p>• ใบงานที่เลือก: <span class="font-semibold text-gray-800">${filterAssignment}</span></p>` : ''}
             <p>• รูปแบบ: <span class="font-semibold text-gray-700">${evaluateMode === 'unevaluated' ? 'เฉพาะที่ยังไม่ตรวจ' : 'ประเมินผลงานทุกคน'}</span></p>
             <p>• เกณฑ์ที่ใช้ประเมิน: <span class="font-semibold text-indigo-700">${customAiCriteria.trim() ? customAiCriteria.trim() : 'ใช้เกณฑ์ประจำใบงาน / มาตรฐานชนิดงาน'}</span></p>
           </div>
@@ -1864,7 +2159,7 @@ export default function TeacherPortalView({
           maxScore: sub.maxScore,
           sampleUrl: sub.sampleUrl,
           rubricCriteria: getAssignmentRubric(sub),
-          customAiCriteria: customAiCriteria.trim() || undefined,
+          customAiCriteria: resolveCustomAiCriteriaForSubmission(sub),
           studentName: sub.studentName,
           workUrl: sub.workUrl,
           studentNumber: sub.studentNumber,
@@ -2497,7 +2792,7 @@ export default function TeacherPortalView({
           maxScore: sub.maxScore,
           sampleUrl: sub.sampleUrl,
           rubricCriteria: getAssignmentRubric(sub),
-          customAiCriteria: customAiCriteria.trim() || undefined,
+          customAiCriteria: resolveCustomAiCriteriaForSubmission(sub),
           studentName: sub.studentName,
           workUrl: sub.workUrl,
           studentNumber: sub.studentNumber,
@@ -4086,6 +4381,17 @@ export default function TeacherPortalView({
             </button>
 
             <button
+              type="button"
+              onClick={handleSyncSheetNow}
+              disabled={isSyncingSheet}
+              className="px-3.5 py-2 text-xs font-bold text-indigo-900 bg-indigo-50 hover:bg-indigo-100 border border-indigo-200 rounded-xl transition-all cursor-pointer flex items-center gap-1.5 shadow-sm disabled:opacity-60"
+              title="ดึงปีการศึกษา ภาคเรียน วิชา และใบงานล่าสุดจาก Google Sheet"
+            >
+              <RefreshCw size={14} className={isSyncingSheet ? 'animate-spin' : ''} />
+              <span>{isSyncingSheet ? 'กำลังซิงค์...' : 'ซิงค์ Sheet'}</span>
+            </button>
+
+            <button
               onClick={handleLogout}
               className="px-3.5 py-2 text-xs font-semibold text-rose-700 hover:bg-rose-50 border border-rose-200 rounded-xl transition-colors flex items-center gap-1.5 cursor-pointer shadow-xs"
             >
@@ -4977,11 +5283,115 @@ export default function TeacherPortalView({
               </div>
             </div>
 
-            {/* ช่องกำหนดเกณฑ์การให้คะแนนด้วย AI ตามต้องการ */}
-            <div className="bg-white/10 backdrop-blur-xs rounded-2xl p-4 border border-indigo-300/25 space-y-2.5">
-              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-                <label className="text-xs font-bold text-white flex items-center gap-2">
-                  <span>🎯 กำหนดเกณฑ์การให้คะแนนด้วย AI (ระบุเกณฑ์ตามต้องการ)</span>
+            {/* ช่องเลือกปีการศึกษา ภาคเรียน (ที่มีใน Sheet) + เลือกวิชาที่สอน + เลือกใบงาน + กำหนดเกณฑ์การให้คะแนนด้วย AI */}
+            <div className="bg-white/10 backdrop-blur-xs rounded-2xl p-4 border border-indigo-300/25 space-y-3">
+              {/* Row 1: ปีการศึกษา + ภาคเรียน (จาก Sheet) + เลือกวิชาที่สอน + เลือกใบงาน */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-12 gap-3 items-end">
+                <div className="lg:col-span-2">
+                  <label className="block text-[11px] font-bold text-indigo-100 mb-1 flex items-center gap-1">
+                    <span>📅</span>
+                    <span>ปีการศึกษา (ใน Sheet)</span>
+                  </label>
+                  <select
+                    value={filterYear}
+                    onChange={(e) => setFilterYear(e.target.value)}
+                    className="w-full px-2.5 py-2 bg-[#071330]/90 border border-indigo-300/35 rounded-xl text-xs font-semibold text-white cursor-pointer focus:outline-none focus:ring-2 focus:ring-pink-400/60"
+                  >
+                    <option value="ALL">-- ทุกปีการศึกษา --</option>
+                    {sheetAcademicYears.map((y) => (
+                      <option key={y} value={y}>
+                        ปี {y}{sheetDataYearSet.has(y) ? ' ✓' : ''}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div className="lg:col-span-2">
+                  <label className="block text-[11px] font-bold text-indigo-100 mb-1 flex items-center gap-1">
+                    <span>📆</span>
+                    <span>ภาคเรียน</span>
+                  </label>
+                  <select
+                    value={filterSemester}
+                    onChange={(e) => setFilterSemester(e.target.value)}
+                    className="w-full px-2.5 py-2 bg-[#071330]/90 border border-indigo-300/35 rounded-xl text-xs font-semibold text-white cursor-pointer focus:outline-none focus:ring-2 focus:ring-pink-400/60"
+                  >
+                    <option value="ALL">-- ทุกเทอม --</option>
+                    {sheetSemesters.map((s) => (
+                      <option key={s} value={s}>
+                        ภาคเรียนที่ {s}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div className="lg:col-span-4">
+                  <label className="block text-[11px] font-bold text-indigo-100 mb-1 flex items-center gap-1.5">
+                    <span>📚</span>
+                    <span>เลือกวิชาที่สอน</span>
+                  </label>
+                  <select
+                    value={filterSubject}
+                    onChange={(e) => handleAiSubjectChange(e.target.value)}
+                    className="w-full px-3 py-2 bg-[#071330]/90 border border-indigo-300/35 rounded-xl text-xs font-semibold text-white cursor-pointer focus:outline-none focus:ring-2 focus:ring-pink-400/60"
+                  >
+                    <option value="ALL">-- ทุกวิชาที่สอน ({teacherSubjects.length} วิชา) --</option>
+                    {teacherSubjects.map(([code, label]) => (
+                      <option key={code} value={code}>
+                        {label}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div className="lg:col-span-4">
+                  <label className="block text-[11px] font-bold text-indigo-100 mb-1 flex items-center justify-between">
+                    <span className="flex items-center gap-1.5">
+                      <span>📝</span>
+                      <span>เลือกใบงาน เพื่อใส่เกณฑ์ให้ AI ตรวจ</span>
+                    </span>
+                    <button
+                      type="button"
+                      onClick={handleSyncSheetNow}
+                      disabled={isSyncingSheet}
+                      className="text-[10px] text-amber-200 hover:text-white flex items-center gap-1 cursor-pointer underline"
+                      title="ดึงข้อมูลปีการศึกษา ภาคเรียน และใบงานล่าสุดจาก Google Sheet"
+                    >
+                      <RefreshCw size={10} className={isSyncingSheet ? 'animate-spin' : ''} />
+                      <span>ดึงจาก Sheet ({gradingAssignmentOptions.length})</span>
+                    </button>
+                  </label>
+                  <select
+                    value={filterAssignment}
+                    onChange={(e) => handleAiAssignmentChange(e.target.value)}
+                    className="w-full px-3 py-2 bg-[#071330]/90 border border-indigo-300/35 rounded-xl text-xs font-semibold text-white cursor-pointer focus:outline-none focus:ring-2 focus:ring-pink-400/60"
+                  >
+                    <option value="ALL">-- ทุกใบงาน ({gradingAssignmentOptions.length} รายการ) --</option>
+                    {gradingAssignmentOptions.map((opt) => {
+                      const hasSavedCriteria = Boolean(
+                        assignmentCriteriaMap[buildCriteriaMapKey(opt.subjectCode || filterSubject, opt.title)] ||
+                        assignmentCriteriaMap[buildCriteriaMapKey('ALL', opt.title)] ||
+                        opt.rubricCriteria
+                      );
+                      return (
+                        <option key={opt.key} value={opt.title}>
+                          {opt.title} (เต็ม {opt.maxScore} คะแนน){hasSavedCriteria ? ' ✓ มีเกณฑ์แล้ว' : ''}
+                        </option>
+                      );
+                    })}
+                  </select>
+                </div>
+              </div>
+
+              {/* Row 2: Header & Presets */}
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pt-1 border-t border-white/10">
+                <label className="text-xs font-bold text-white flex flex-wrap items-center gap-2">
+                  <span>🎯 เกณฑ์การให้คะแนนด้วย AI</span>
+                  {filterAssignment !== 'ALL' && (
+                    <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-pink-500/25 text-pink-100 border border-pink-400/40">
+                      📄 {filterAssignment}
+                    </span>
+                  )}
                   <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
                     customAiCriteria.trim()
                       ? 'bg-emerald-500/25 text-emerald-200 border border-emerald-400/40'
@@ -5032,13 +5442,29 @@ export default function TeacherPortalView({
                 </div>
               </div>
 
-              <textarea
-                rows={2}
-                value={customAiCriteria}
-                onChange={(e) => handleCustomAiCriteriaChange(e.target.value)}
-                placeholder="พิมพ์เกณฑ์การให้คะแนนที่ต้องการให้ AI ใช้ประเมิน เช่น: ความถูกต้องของเนื้อหา 5 คะแนน, ความคิดสร้างสรรค์ 3 คะแนน, ความเรียบร้อยและการส่งตรงเวลา 2 คะแนน (หากเว้นว่าง ระบบจะใช้เกณฑ์ประจำใบงานหรือเกณฑ์มาตรฐาน)"
-                className="w-full px-3.5 py-2.5 bg-[#071330]/80 border border-indigo-300/30 rounded-xl text-xs text-white placeholder:text-indigo-200/50 focus:outline-none focus:ring-2 focus:ring-pink-400/60"
-              />
+              {/* Row 3: Textarea + Save button */}
+              <div className="flex flex-col sm:flex-row gap-2.5 items-stretch sm:items-end">
+                <textarea
+                  rows={2}
+                  value={customAiCriteria}
+                  onChange={(e) => handleCustomAiCriteriaChange(e.target.value)}
+                  placeholder={
+                    filterAssignment !== 'ALL'
+                      ? `พิมพ์เกณฑ์ให้คะแนนสำหรับ "${filterAssignment}" เช่น: ความถูกต้องของเนื้อหา 5 คะแนน, ความคิดสร้างสรรค์ 3 คะแนน, ความเรียบร้อย 2 คะแนน`
+                      : 'พิมพ์เกณฑ์การให้คะแนนที่ต้องการให้ AI ใช้ประเมิน เช่น: ความถูกต้องของเนื้อหา 5 คะแนน, ความคิดสร้างสรรค์ 3 คะแนน, ความเรียบร้อยและการส่งตรงเวลา 2 คะแนน'
+                  }
+                  className="flex-1 px-3.5 py-2.5 bg-[#071330]/80 border border-indigo-300/30 rounded-xl text-xs text-white placeholder:text-indigo-200/50 focus:outline-none focus:ring-2 focus:ring-pink-400/60"
+                />
+                <button
+                  type="button"
+                  onClick={handleSaveCriteriaToAssignment}
+                  className="px-4 py-2.5 bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-600 hover:to-teal-600 text-white font-bold rounded-xl text-xs shadow-md shadow-emerald-950/40 flex items-center justify-center gap-1.5 transition-all cursor-pointer whitespace-nowrap shrink-0 hover:scale-[1.02] active:scale-[0.98]"
+                  title="บันทึกเกณฑ์การให้คะแนนนี้ลงในใบงานที่เลือก"
+                >
+                  <Save size={14} />
+                  <span>{filterAssignment !== 'ALL' ? '💾 บันทึกเกณฑ์ใบงานนี้' : '💾 บันทึกเกณฑ์'}</span>
+                </button>
+              </div>
             </div>
           </div>
 
@@ -5120,7 +5546,7 @@ export default function TeacherPortalView({
                 </label>
                 <select
                   value={filterSubject}
-                  onChange={(e) => setFilterSubject(e.target.value)}
+                  onChange={(e) => handleAiSubjectChange(e.target.value)}
                   className="w-full px-2 py-2 bg-purple-50/20 border border-purple-200/80 rounded-xl text-xs font-medium text-gray-800 cursor-pointer focus:outline-none focus:ring-2 focus:ring-purple-300"
                 >
                   <option value="ALL">-- ทุกวิชา ({teacherSubjects.length}) --</option>
@@ -5219,7 +5645,7 @@ export default function TeacherPortalView({
                   <span>ข้อมูลที่กรอง:</span>
                 </span>
                 <span className="text-gray-700">
-                  ปี {filterYear !== 'ALL' ? filterYear : 'ทุกปี'} • {filterSemester !== 'ALL' ? `เทอม ${filterSemester}` : 'ทุกเทอม'} • {filterSubject !== 'ALL' ? filterSubject : 'ทุกวิชา'} • {filterGrade !== 'ALL' ? filterGrade : 'ทุกชั้น'} • {filterRoom !== 'ALL' ? `ห้อง ${filterRoom}` : 'ทุกห้อง'} • {filterStatus !== 'ALL' ? filterStatus : 'ทุกสถานะ'} • {filterAiStatus !== 'ALL' ? (filterAiStatus === 'EVALUATED' ? 'AI ตรวจแล้ว' : 'AI ยังไม่ตรวจ') : 'ทุกสถานะ AI'}
+                  ปี {filterYear !== 'ALL' ? filterYear : 'ทุกปี'} • {filterSemester !== 'ALL' ? `เทอม ${filterSemester}` : 'ทุกเทอม'} • {filterSubject !== 'ALL' ? filterSubject : 'ทุกวิชา'} • {filterAssignment !== 'ALL' ? filterAssignment : 'ทุกใบงาน'} • {filterGrade !== 'ALL' ? filterGrade : 'ทุกชั้น'} • {filterRoom !== 'ALL' ? `ห้อง ${filterRoom}` : 'ทุกห้อง'} • {filterStatus !== 'ALL' ? filterStatus : 'ทุกสถานะ'} • {filterAiStatus !== 'ALL' ? (filterAiStatus === 'EVALUATED' ? 'AI ตรวจแล้ว' : 'AI ยังไม่ตรวจ') : 'ทุกสถานะ AI'}
                 </span>
                 <span className="bg-gradient-to-r from-violet-600 to-indigo-600 text-white font-bold px-2.5 py-0.5 rounded-full text-[10px] shadow-xs">
                   ✨ พบ {displayGradingCount} รายการ
@@ -7197,48 +7623,95 @@ export default function TeacherPortalView({
               onSubmit={handleSaveAssignments}
               className="bg-white/95 backdrop-blur-md rounded-3xl p-6 md:p-7 shadow-xl border border-white/60 space-y-6"
             >
-              <div className="border-b border-gray-100 pb-3 flex items-center gap-2">
-                <Plus className="text-indigo-600" size={20} />
-                <div>
-                  <h3 className="text-base font-bold text-gray-900">เพิ่มใบงานใหม่</h3>
-                  <p className="text-xs text-gray-500">กำหนดชื่อใบงานและคะแนนเต็ม</p>
+              <div className="border-b border-gray-100 pb-3 flex items-center justify-between gap-2">
+                <div className="flex items-center gap-2">
+                  <Plus className="text-indigo-600" size={20} />
+                  <div>
+                    <h3 className="text-base font-bold text-gray-900">เพิ่มใบงานใหม่</h3>
+                    <p className="text-xs text-gray-500">กำหนดปีการศึกษา ภาคเรียน วิชา และเกณฑ์ให้คะแนน</p>
+                  </div>
                 </div>
+                <button
+                  type="button"
+                  onClick={handleSyncSheetNow}
+                  disabled={isSyncingSheet}
+                  className="px-2.5 py-1.5 text-[11px] font-bold text-indigo-700 bg-indigo-50 hover:bg-indigo-100 border border-indigo-200 rounded-xl flex items-center gap-1 cursor-pointer transition-colors"
+                  title="ดึงปีการศึกษา ภาคเรียน และรายวิชาล่าสุดจาก Google Sheet"
+                >
+                  <RefreshCw size={12} className={isSyncingSheet ? 'animate-spin' : ''} />
+                  <span>ดึงจาก Sheet</span>
+                </button>
               </div>
 
-              {/* ปีการศึกษา และ ภาคเรียน */}
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-xs font-semibold text-gray-700 mb-1">
-                    ปีการศึกษา <span className="text-red-500">*</span>
-                  </label>
-                  <select
-                    value={assignYear}
-                    onChange={(e) => setAssignYear(e.target.value)}
-                    className="w-full px-3 py-2 bg-white border border-gray-200 rounded-xl text-xs font-medium text-gray-800 cursor-pointer"
-                  >
-                    {ACADEMIC_YEARS.map((y) => (
-                      <option key={y} value={y}>
-                        ปีการศึกษา {y}
-                      </option>
-                    ))}
-                  </select>
+              {/* ปีการศึกษา และ ภาคเรียน (เลือกจากที่มีใน Sheet หรือพิมพ์ใส่เองได้) */}
+              <div className="p-3.5 bg-indigo-50/60 rounded-2xl border border-indigo-200/80 space-y-3">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-bold text-indigo-950 flex items-center gap-1.5">
+                    <span>📅</span>
+                    <span>ปีการศึกษา และ ภาคเรียน (เลือกที่มีใน Sheet หรือพิมพ์เพิ่มเอง)</span>
+                  </span>
                 </div>
 
-                <div>
-                  <label className="block text-xs font-semibold text-gray-700 mb-1">
-                    ภาคเรียน <span className="text-red-500">*</span>
-                  </label>
-                  <select
-                    value={assignSemester}
-                    onChange={(e) => setAssignSemester(e.target.value)}
-                    className="w-full px-3 py-2 bg-white border border-gray-200 rounded-xl text-xs font-medium text-gray-800 cursor-pointer"
-                  >
-                    {SEMESTERS.map((s) => (
-                      <option key={s.value} value={s.value}>
-                        {s.label}
-                      </option>
-                    ))}
-                  </select>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div className="space-y-1.5">
+                    <label className="block text-xs font-semibold text-gray-700">
+                      ปีการศึกษา <span className="text-red-500">*</span>
+                    </label>
+                    <select
+                      value={sheetAcademicYears.includes(assignYear) ? assignYear : '__CUSTOM__'}
+                      onChange={(e) => {
+                        if (e.target.value !== '__CUSTOM__') {
+                          setAssignYear(e.target.value);
+                        }
+                      }}
+                      className="w-full px-3 py-2 bg-white border border-indigo-200 rounded-xl text-xs font-bold text-gray-800 cursor-pointer focus:outline-none focus:ring-2 focus:ring-indigo-400"
+                    >
+                      {sheetAcademicYears.map((y) => (
+                        <option key={y} value={y}>
+                          ปีการศึกษา {y}{sheetDataYearSet.has(y) ? ' (มีใน Sheet ✓)' : ''}
+                        </option>
+                      ))}
+                      <option value="__CUSTOM__">✏️ พิมพ์ปีการศึกษาเอง...</option>
+                    </select>
+                    <input
+                      type="text"
+                      required
+                      value={assignYear}
+                      onChange={(e) => setAssignYear(e.target.value)}
+                      placeholder="พิมพ์ปีการศึกษา เช่น 2569, 2570"
+                      className="w-full px-3 py-1.5 bg-white border border-indigo-200/90 rounded-xl text-xs font-semibold text-indigo-950 focus:outline-none focus:ring-2 focus:ring-indigo-400"
+                    />
+                  </div>
+
+                  <div className="space-y-1.5">
+                    <label className="block text-xs font-semibold text-gray-700">
+                      ภาคเรียน <span className="text-red-500">*</span>
+                    </label>
+                    <select
+                      value={sheetSemesters.includes(assignSemester) ? assignSemester : '__CUSTOM__'}
+                      onChange={(e) => {
+                        if (e.target.value !== '__CUSTOM__') {
+                          setAssignSemester(e.target.value);
+                        }
+                      }}
+                      className="w-full px-3 py-2 bg-white border border-indigo-200 rounded-xl text-xs font-bold text-gray-800 cursor-pointer focus:outline-none focus:ring-2 focus:ring-indigo-400"
+                    >
+                      {sheetSemesters.map((s) => (
+                        <option key={s} value={s}>
+                          ภาคเรียนที่ {s}
+                        </option>
+                      ))}
+                      <option value="__CUSTOM__">✏️ พิมพ์ภาคเรียนเอง...</option>
+                    </select>
+                    <input
+                      type="text"
+                      required
+                      value={assignSemester}
+                      onChange={(e) => setAssignSemester(e.target.value)}
+                      placeholder="พิมพ์ภาคเรียน เช่น 1, 2, ฤดูร้อน"
+                      className="w-full px-3 py-1.5 bg-white border border-indigo-200/90 rounded-xl text-xs font-semibold text-indigo-950 focus:outline-none focus:ring-2 focus:ring-indigo-400"
+                    />
+                  </div>
                 </div>
               </div>
 
@@ -7266,7 +7739,7 @@ export default function TeacherPortalView({
                   <option value="">-- เลือกจากรายวิชาที่มีอยู่ ({subjects.length} วิชา) --</option>
                   {subjects.map((s) => (
                     <option key={s.id || s.code} value={s.code}>
-                      {s.code} - {s.name}
+                      {s.code} - {s.name}{s.academicYear ? ` (ปี ${s.academicYear} เทอม ${s.semester || '1'})` : ''}
                     </option>
                   ))}
                   <option value="__MANAGE__">➕ จัดการรายวิชา (เพิ่ม/แก้ไข/ลบ)...</option>
@@ -7461,19 +7934,65 @@ export default function TeacherPortalView({
           {/* Table: รายการงานที่สร้างไว้ */}
           <div className="lg:col-span-7">
             <div className="bg-white/95 backdrop-blur-md rounded-3xl p-6 shadow-xl border border-white/60 space-y-4">
-              <div className="flex items-center justify-between border-b border-gray-100 pb-3">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between border-b border-gray-100 pb-3 gap-3">
                 <div>
                   <h3 className="text-base font-bold text-gray-900 flex items-center gap-1.5">
                     <span>📋</span>
-                    <span>งานทั้งหมดที่คุณครูสร้างไว้ ({assignments.filter(a => a.teacherName === activeTeacher.fullName).length} ชิ้นงาน)</span>
+                    <span>งานทั้งหมดที่คุณครูสร้างไว้ ({assignments.filter(a => matchesTeacher(a.teacherName, activeTeacher.fullName)).length} ชิ้นงาน)</span>
                   </h3>
-                  <p className="text-xs text-gray-500">สามารถตรวจสอบตัวอย่างใบงานและลบชิ้นงานได้</p>
+                  <p className="text-xs text-gray-500">กรองตามปีการศึกษา ภาคเรียน หรือรายวิชาที่มีใน Sheet ได้ทันที</p>
                 </div>
+              </div>
+
+              {/* Filter assignments by Sheet Academic Year, Semester & Subject */}
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 p-3 bg-purple-50/40 rounded-2xl border border-purple-100">
+                <select
+                  value={assignListYearFilter}
+                  onChange={(e) => setAssignListYearFilter(e.target.value)}
+                  className="px-2.5 py-2 bg-white border border-purple-200 rounded-xl text-xs font-semibold text-gray-800 cursor-pointer focus:outline-none focus:ring-2 focus:ring-purple-300"
+                >
+                  <option value="ALL">-- ปีการศึกษาทั้งหมดใน Sheet --</option>
+                  {sheetAcademicYears.map((y) => (
+                    <option key={y} value={y}>
+                      ปีการศึกษา {y}{sheetDataYearSet.has(y) ? ' ✓' : ''}
+                    </option>
+                  ))}
+                </select>
+                <select
+                  value={assignListSemFilter}
+                  onChange={(e) => setAssignListSemFilter(e.target.value)}
+                  className="px-2.5 py-2 bg-white border border-purple-200 rounded-xl text-xs font-semibold text-gray-800 cursor-pointer focus:outline-none focus:ring-2 focus:ring-purple-300"
+                >
+                  <option value="ALL">-- ทุกภาคเรียน --</option>
+                  {sheetSemesters.map((s) => (
+                    <option key={s} value={s}>
+                      ภาคเรียนที่ {s}
+                    </option>
+                  ))}
+                </select>
+                <select
+                  value={assignListSubjFilter}
+                  onChange={(e) => setAssignListSubjFilter(e.target.value)}
+                  className="px-2.5 py-2 bg-white border border-purple-200 rounded-xl text-xs font-semibold text-gray-800 cursor-pointer focus:outline-none focus:ring-2 focus:ring-purple-300"
+                >
+                  <option value="ALL">-- ทุกรายวิชา ({teacherSubjects.length}) --</option>
+                  {teacherSubjects.map(([code, label]) => (
+                    <option key={code} value={code}>
+                      {label}
+                    </option>
+                  ))}
+                </select>
               </div>
 
               <div className="space-y-3">
                 {assignments
-                  .filter(a => a.teacherName === activeTeacher.fullName)
+                  .filter(a => {
+                    const matchT = matchesTeacher(a.teacherName, activeTeacher.fullName);
+                    const matchY = assignListYearFilter === 'ALL' || (a.academicYear || '') === assignListYearFilter;
+                    const matchS = assignListSemFilter === 'ALL' || (a.semester || '') === assignListSemFilter;
+                    const matchSub = assignListSubjFilter === 'ALL' || a.subjectCode === assignListSubjFilter;
+                    return matchT && matchY && matchS && matchSub;
+                  })
                   .map((a) => (
                     <div
                       key={a.id}
@@ -7488,8 +8007,8 @@ export default function TeacherPortalView({
                             {a.subjectName}
                           </span>
                           {a.academicYear && (
-                            <span className="text-[10px] text-gray-400">
-                              (ปี {a.academicYear} เทอม {a.semester || '1'})
+                            <span className="px-2 py-0.5 rounded-md text-[10px] font-bold bg-indigo-50 text-indigo-800 border border-indigo-200">
+                              ปี {a.academicYear} เทอม {a.semester || '1'}
                             </span>
                           )}
                         </div>
@@ -7541,9 +8060,15 @@ export default function TeacherPortalView({
                     </div>
                   ))}
 
-                {assignments.filter(a => a.teacherName === activeTeacher.fullName).length === 0 && (
+                {assignments.filter(a => {
+                  const matchT = matchesTeacher(a.teacherName, activeTeacher.fullName);
+                  const matchY = assignListYearFilter === 'ALL' || (a.academicYear || '') === assignListYearFilter;
+                  const matchS = assignListSemFilter === 'ALL' || (a.semester || '') === assignListSemFilter;
+                  const matchSub = assignListSubjFilter === 'ALL' || a.subjectCode === assignListSubjFilter;
+                  return matchT && matchY && matchS && matchSub;
+                }).length === 0 && (
                   <div className="text-center py-10 text-gray-400 text-xs">
-                    ยังไม่มีใบงานที่คุณครูสร้างไว้ กรุณากรอกแบบฟอร์มด้านซ้ายเพื่อเพิ่มงาน
+                    ยังไม่มีใบงานตามเงื่อนไขที่เลือก กรุณากรอกแบบฟอร์มด้านซ้ายเพื่อเพิ่มงาน หรือกด "ดึงจาก Sheet"
                   </div>
                 )}
               </div>
@@ -7581,39 +8106,63 @@ export default function TeacherPortalView({
 
             {/* Edit Form */}
             <form onSubmit={handleSaveEditAssignment} className="space-y-4">
-              {/* ปีการศึกษา และ ภาคเรียน */}
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-xs font-semibold text-gray-700 mb-1">
+              {/* ปีการศึกษา และ ภาคเรียน (เลือกจากที่มีใน Sheet หรือพิมพ์เอง) */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div className="space-y-1.5">
+                  <label className="block text-xs font-semibold text-gray-700">
                     ปีการศึกษา
                   </label>
                   <select
-                    value={editingAssignment.academicYear || '2567'}
-                    onChange={(e) => setEditingAssignment(prev => prev ? { ...prev, academicYear: e.target.value } : null)}
+                    value={sheetAcademicYears.includes(editingAssignment.academicYear || '') ? editingAssignment.academicYear : '__CUSTOM__'}
+                    onChange={(e) => {
+                      if (e.target.value !== '__CUSTOM__') {
+                        setEditingAssignment(prev => prev ? { ...prev, academicYear: e.target.value } : null);
+                      }
+                    }}
                     className="w-full px-3 py-2 bg-gray-50 border border-gray-200 rounded-xl text-xs font-medium text-gray-800 cursor-pointer focus:outline-none focus:ring-2 focus:ring-amber-300"
                   >
-                    {ACADEMIC_YEARS.map((y) => (
+                    {sheetAcademicYears.map((y) => (
                       <option key={y} value={y}>
-                        ปีการศึกษา {y}
+                        ปีการศึกษา {y}{sheetDataYearSet.has(y) ? ' (ใน Sheet)' : ''}
                       </option>
                     ))}
+                    <option value="__CUSTOM__">✏️ พิมพ์ปีการศึกษาเอง...</option>
                   </select>
+                  <input
+                    type="text"
+                    value={editingAssignment.academicYear || ''}
+                    onChange={(e) => setEditingAssignment(prev => prev ? { ...prev, academicYear: e.target.value } : null)}
+                    placeholder="ระบุปีการศึกษา เช่น 2569"
+                    className="w-full px-3 py-1.5 bg-white border border-gray-200 rounded-xl text-xs font-semibold text-gray-800 focus:outline-none focus:ring-2 focus:ring-amber-300"
+                  />
                 </div>
-                <div>
-                  <label className="block text-xs font-semibold text-gray-700 mb-1">
+                <div className="space-y-1.5">
+                  <label className="block text-xs font-semibold text-gray-700">
                     ภาคเรียน
                   </label>
                   <select
-                    value={editingAssignment.semester || '1'}
-                    onChange={(e) => setEditingAssignment(prev => prev ? { ...prev, semester: e.target.value } : null)}
+                    value={sheetSemesters.includes(editingAssignment.semester || '') ? editingAssignment.semester : '__CUSTOM__'}
+                    onChange={(e) => {
+                      if (e.target.value !== '__CUSTOM__') {
+                        setEditingAssignment(prev => prev ? { ...prev, semester: e.target.value } : null);
+                      }
+                    }}
                     className="w-full px-3 py-2 bg-gray-50 border border-gray-200 rounded-xl text-xs font-medium text-gray-800 cursor-pointer focus:outline-none focus:ring-2 focus:ring-amber-300"
                   >
-                    {SEMESTERS.map((s) => (
-                      <option key={s.value} value={s.value}>
-                        {s.label}
+                    {sheetSemesters.map((s) => (
+                      <option key={s} value={s}>
+                        ภาคเรียนที่ {s}
                       </option>
                     ))}
+                    <option value="__CUSTOM__">✏️ พิมพ์ภาคเรียนเอง...</option>
                   </select>
+                  <input
+                    type="text"
+                    value={editingAssignment.semester || ''}
+                    onChange={(e) => setEditingAssignment(prev => prev ? { ...prev, semester: e.target.value } : null)}
+                    placeholder="ระบุภาคเรียน เช่น 1, 2"
+                    className="w-full px-3 py-1.5 bg-white border border-gray-200 rounded-xl text-xs font-semibold text-gray-800 focus:outline-none focus:ring-2 focus:ring-amber-300"
+                  />
                 </div>
               </div>
 
@@ -7969,59 +8518,127 @@ export default function TeacherPortalView({
               </button>
             </div>
 
-            {/* ส่วน 1: แบบฟอร์มเพิ่มรายวิชาใหม่ */}
+            {/* ส่วน 1: แบบฟอร์มเพิ่มรายวิชาใหม่ พร้อมปีการศึกษาและภาคเรียน */}
             <form onSubmit={handleAddSubject} className="p-4 bg-amber-50/70 rounded-2xl border border-amber-200 space-y-3">
-              <div className="text-xs font-bold text-amber-950 flex items-center gap-1.5">
-                <span>➕</span>
-                <span>เพิ่มรายวิชาใหม่</span>
+              <div className="flex items-center justify-between gap-2">
+                <div className="text-xs font-bold text-amber-950 flex items-center gap-1.5">
+                  <span>➕</span>
+                  <span>เพิ่มรายวิชาใหม่ (ระบุปีการศึกษา & ภาคเรียน)</span>
+                </div>
+                <button
+                  type="button"
+                  onClick={handleSyncSheetNow}
+                  disabled={isSyncingSheet}
+                  className="px-2.5 py-1 text-[11px] font-bold text-indigo-700 bg-white hover:bg-indigo-50 border border-indigo-200 rounded-xl flex items-center gap-1 cursor-pointer transition-colors"
+                >
+                  <RefreshCw size={11} className={isSyncingSheet ? 'animate-spin' : ''} />
+                  <span>ดึงจาก Sheet</span>
+                </button>
               </div>
+
               <div className="grid grid-cols-1 sm:grid-cols-12 gap-2.5">
-                <div className="sm:col-span-4">
+                <div className="sm:col-span-3">
+                  <label className="block text-[10px] font-bold text-amber-900 mb-1">ปีการศึกษา</label>
+                  <input
+                    type="text"
+                    list="sheet-years-list"
+                    required
+                    value={newSubjYear}
+                    onChange={(e) => setNewSubjYear(e.target.value)}
+                    placeholder="เช่น 2569"
+                    className="w-full px-3 py-2 bg-white border border-amber-300 rounded-xl text-xs font-semibold text-gray-800 focus:outline-none focus:ring-2 focus:ring-amber-400"
+                  />
+                  <datalist id="sheet-years-list">
+                    {sheetAcademicYears.map((y) => (
+                      <option key={y} value={y}>ปีการศึกษา {y}</option>
+                    ))}
+                  </datalist>
+                </div>
+                <div className="sm:col-span-3">
+                  <label className="block text-[10px] font-bold text-amber-900 mb-1">ภาคเรียน</label>
+                  <select
+                    value={newSubjSemester}
+                    onChange={(e) => setNewSubjSemester(e.target.value)}
+                    className="w-full px-3 py-2 bg-white border border-amber-300 rounded-xl text-xs font-semibold text-gray-800 cursor-pointer focus:outline-none focus:ring-2 focus:ring-amber-400"
+                  >
+                    {sheetSemesters.map((s) => (
+                      <option key={s} value={s}>ภาคเรียนที่ {s}</option>
+                    ))}
+                  </select>
+                </div>
+                <div className="sm:col-span-3">
+                  <label className="block text-[10px] font-bold text-amber-900 mb-1">รหัสวิชา *</label>
                   <input
                     type="text"
                     required
                     value={newSubjCode}
                     onChange={(e) => setNewSubjCode(e.target.value)}
-                    placeholder="รหัสวิชา เช่น ว21103"
+                    placeholder="เช่น ว21103"
                     className="w-full px-3 py-2 bg-white border border-amber-300 rounded-xl text-xs font-semibold text-gray-800 focus:outline-none focus:ring-2 focus:ring-amber-400"
                   />
                 </div>
-                <div className="sm:col-span-6">
+                <div className="sm:col-span-3">
+                  <label className="block text-[10px] font-bold text-amber-900 mb-1">ชื่อวิชา *</label>
                   <input
                     type="text"
                     required
                     value={newSubjName}
                     onChange={(e) => setNewSubjName(e.target.value)}
-                    placeholder="ชื่อวิชา เช่น วิทยาการคำนวณ 1"
+                    placeholder="เช่น วิทยาการคำนวณ 1"
                     className="w-full px-3 py-2 bg-white border border-amber-300 rounded-xl text-xs font-semibold text-gray-800 focus:outline-none focus:ring-2 focus:ring-amber-400"
                   />
                 </div>
-                <div className="sm:col-span-2">
-                  <button
-                    type="submit"
-                    className="w-full h-full py-2 bg-gradient-to-r from-amber-500 to-yellow-600 hover:from-amber-600 hover:to-yellow-700 text-white rounded-xl text-xs font-bold shadow-xs transition-all cursor-pointer flex items-center justify-center gap-1"
-                  >
-                    <Plus size={14} />
-                    <span>เพิ่มวิชา</span>
-                  </button>
-                </div>
+              </div>
+              <div className="flex justify-end">
+                <button
+                  type="submit"
+                  className="px-4 py-2 bg-gradient-to-r from-amber-500 to-yellow-600 hover:from-amber-600 hover:to-yellow-700 text-white rounded-xl text-xs font-bold shadow-xs transition-all cursor-pointer flex items-center justify-center gap-1"
+                >
+                  <Plus size={14} />
+                  <span>เพิ่มวิชา (ปี {newSubjYear} เทอม {newSubjSemester})</span>
+                </button>
               </div>
             </form>
 
-            {/* ส่วน 2: รายการวิชาที่มีในระบบ */}
+            {/* ส่วน 2: รายการวิชาที่มีในระบบ / Sheet */}
             <div className="space-y-3">
-              <div className="flex items-center justify-between">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
                 <h4 className="text-xs font-bold text-gray-800 flex items-center gap-1.5">
                   <span>📋</span>
-                  <span>รายวิชาทั้งหมดในระบบ ({subjects.length} วิชา)</span>
+                  <span>รายวิชาทั้งหมดในระบบ / Sheet ({subjects.length} วิชา)</span>
                 </h4>
-                <span className="text-[11px] text-gray-400">
-                  คลิกที่ปุ่มเพื่อเลือก / แก้ไข / ลบ
-                </span>
+                <div className="flex items-center gap-2">
+                  <select
+                    value={subjFilterYear}
+                    onChange={(e) => setSubjFilterYear(e.target.value)}
+                    className="px-2.5 py-1 bg-amber-50 border border-amber-200 rounded-lg text-[11px] font-semibold text-gray-800 cursor-pointer"
+                  >
+                    <option value="ALL">ทุกปีการศึกษา</option>
+                    {sheetAcademicYears.map((y) => (
+                      <option key={y} value={y}>ปี {y}{sheetDataYearSet.has(y) ? ' ✓' : ''}</option>
+                    ))}
+                  </select>
+                  <select
+                    value={subjFilterSemester}
+                    onChange={(e) => setSubjFilterSemester(e.target.value)}
+                    className="px-2.5 py-1 bg-amber-50 border border-amber-200 rounded-lg text-[11px] font-semibold text-gray-800 cursor-pointer"
+                  >
+                    <option value="ALL">ทุกเทอม</option>
+                    {sheetSemesters.map((s) => (
+                      <option key={s} value={s}>เทอม {s}</option>
+                    ))}
+                  </select>
+                </div>
               </div>
 
               <div className="space-y-2 max-h-64 overflow-y-auto pr-1">
-                {subjects.map((s) => {
+                {subjects
+                  .filter(s => {
+                    const matchY = subjFilterYear === 'ALL' || !s.academicYear || s.academicYear === subjFilterYear;
+                    const matchS = subjFilterSemester === 'ALL' || !s.semester || s.semester === subjFilterSemester;
+                    return matchY && matchS;
+                  })
+                  .map((s) => {
                   const isEditingThis = editingSubject?.oldCode === s.code;
                   const countAssignments = assignments.filter(a => a.subjectCode === s.code).length;
 
@@ -8037,7 +8654,26 @@ export default function TeacherPortalView({
                           <span>แก้ไขข้อมูลวิชา:</span>
                         </div>
                         <div className="grid grid-cols-1 sm:grid-cols-12 gap-2">
-                          <div className="sm:col-span-4">
+                          <div className="sm:col-span-3">
+                            <input
+                              type="text"
+                              list="sheet-years-list"
+                              value={editingSubject.academicYear}
+                              onChange={(e) => setEditingSubject(prev => prev ? { ...prev, academicYear: e.target.value } : null)}
+                              placeholder="ปีการศึกษา"
+                              className="w-full px-2.5 py-1.5 bg-white border border-amber-300 rounded-lg text-xs font-bold text-gray-800 focus:outline-none focus:ring-2 focus:ring-amber-400"
+                            />
+                          </div>
+                          <div className="sm:col-span-2">
+                            <input
+                              type="text"
+                              value={editingSubject.semester}
+                              onChange={(e) => setEditingSubject(prev => prev ? { ...prev, semester: e.target.value } : null)}
+                              placeholder="เทอม"
+                              className="w-full px-2.5 py-1.5 bg-white border border-amber-300 rounded-lg text-xs font-bold text-gray-800 focus:outline-none focus:ring-2 focus:ring-amber-400"
+                            />
+                          </div>
+                          <div className="sm:col-span-3">
                             <input
                               type="text"
                               required
@@ -8046,7 +8682,7 @@ export default function TeacherPortalView({
                               className="w-full px-2.5 py-1.5 bg-white border border-amber-300 rounded-lg text-xs font-bold text-gray-800 focus:outline-none focus:ring-2 focus:ring-amber-400"
                             />
                           </div>
-                          <div className="sm:col-span-8">
+                          <div className="sm:col-span-4">
                             <input
                               type="text"
                               required
@@ -8089,7 +8725,12 @@ export default function TeacherPortalView({
                           <p className="text-xs font-bold text-gray-800 truncate">
                             {s.name}
                           </p>
-                          <p className="text-[10px] text-gray-400 flex items-center gap-1.5">
+                          <p className="text-[10px] text-gray-400 flex flex-wrap items-center gap-1.5">
+                            {s.academicYear && (
+                              <span className="px-1.5 py-0.5 bg-indigo-50 text-indigo-700 border border-indigo-200 rounded font-semibold">
+                                ปี {s.academicYear} เทอม {s.semester || '1'}
+                              </span>
+                            )}
                             <span>มีใบงาน {countAssignments} ชิ้นงาน</span>
                             {s.teacherName && (
                               <>
@@ -8108,6 +8749,8 @@ export default function TeacherPortalView({
                           onClick={() => {
                             setSubjectCode(s.code);
                             setSubjectName(s.name);
+                            if (s.academicYear) setAssignYear(s.academicYear);
+                            if (s.semester) setAssignSemester(s.semester);
                             setSelectedSubjectSelect(s.code);
                             setIsManageSubjectsOpen(false);
                             alertService.success('เลือกวิชาแล้ว', `เลือกวิชา "${s.code} ${s.name}" สำหรับสร้างงาน`);
@@ -8121,9 +8764,15 @@ export default function TeacherPortalView({
                         {/* ปุ่มแก้ไข */}
                         <button
                           type="button"
-                          onClick={() => setEditingSubject({ oldCode: s.code, code: s.code, name: s.name })}
+                          onClick={() => setEditingSubject({
+                            oldCode: s.code,
+                            code: s.code,
+                            name: s.name,
+                            academicYear: s.academicYear || assignYear || '2569',
+                            semester: s.semester || assignSemester || '2',
+                          })}
                           className="p-1.5 text-amber-800 hover:text-black hover:bg-amber-100 border border-amber-200 rounded-lg transition-colors cursor-pointer"
-                          title="แก้ไขรหัสวิชาและชื่อวิชา"
+                          title="แก้ไขรหัสวิชา ชื่อวิชา ปีการศึกษา และภาคเรียน"
                         >
                           <Edit3 size={14} />
                         </button>
@@ -8448,7 +9097,7 @@ export default function TeacherPortalView({
                     onChange={(e) => setImportTargetYear(e.target.value)}
                     className="w-full px-2.5 py-2 bg-white border border-gray-300 rounded-xl text-xs font-bold cursor-pointer focus:outline-none focus:ring-2 focus:ring-emerald-400"
                   >
-                    {ACADEMIC_YEARS.map(y => (
+                    {sheetAcademicYears.map(y => (
                       <option key={y} value={y}>{y}</option>
                     ))}
                   </select>
@@ -8464,8 +9113,8 @@ export default function TeacherPortalView({
                     onChange={(e) => setImportTargetSemester(e.target.value)}
                     className="w-full px-2.5 py-2 bg-white border border-gray-300 rounded-xl text-xs font-bold cursor-pointer focus:outline-none focus:ring-2 focus:ring-emerald-400"
                   >
-                    {SEMESTERS.map(s => (
-                      <option key={s.value} value={s.value}>{s.label}</option>
+                    {sheetSemesters.map(s => (
+                      <option key={s} value={s}>ภาคเรียนที่ {s}</option>
                     ))}
                   </select>
                 </div>

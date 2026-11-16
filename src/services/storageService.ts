@@ -787,24 +787,40 @@ export const storageService = {
       code: cleanCode,
       name: cleanName,
       teacherName: subject.teacherName,
-      academicYear: subject.academicYear || '2567',
-      semester: subject.semester || '1',
+      academicYear: subject.academicYear?.trim() || '2569',
+      semester: subject.semester?.trim() || '2',
       createdAt: new Date().toLocaleString('th-TH'),
     };
 
     list.unshift(newSubject);
     this.saveSubjects(list);
 
+    if (config?.scriptUrl) {
+      try {
+        await fetch(config.scriptUrl, {
+          method: 'POST',
+          mode: 'no-cors',
+          headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+          body: JSON.stringify({
+            action: 'saveSubject',
+            subject: newSubject,
+          }),
+        });
+      } catch (err) {
+        console.warn('Save subject sync err:', err);
+      }
+    }
+
     return { 
       success: true, 
-      message: `เพิ่มรายวิชา "${cleanCode} ${cleanName}" เรียบร้อยแล้ว ✨`, 
+      message: `เพิ่มรายวิชา "${cleanCode} ${cleanName}" (ปีการศึกษา ${newSubject.academicYear} เทอม ${newSubject.semester}) เรียบร้อยแล้ว ✨`, 
       subject: newSubject 
     };
   },
 
   async updateSubject(
     oldCode: string, 
-    updated: { code: string; name: string }, 
+    updated: { code: string; name: string; academicYear?: string; semester?: string }, 
     config?: GoogleSheetConfig
   ): Promise<{ success: boolean; message: string }> {
     const list = this.getSubjects();
@@ -828,7 +844,13 @@ export const storageService = {
       }
     }
 
-    list[index] = { ...list[index], code: newCode, name: newName };
+    list[index] = {
+      ...list[index],
+      code: newCode,
+      name: newName,
+      ...(updated.academicYear !== undefined ? { academicYear: updated.academicYear.trim() } : {}),
+      ...(updated.semester !== undefined ? { semester: updated.semester.trim() } : {}),
+    };
     this.saveSubjects(list);
 
     // Cascade update to all assignments matching oldCode
@@ -859,6 +881,23 @@ export const storageService = {
       this.saveSubmissions(updatedSubmissions);
     }
 
+    if (config?.scriptUrl) {
+      try {
+        await fetch(config.scriptUrl, {
+          method: 'POST',
+          mode: 'no-cors',
+          headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+          body: JSON.stringify({
+            action: 'updateSubject',
+            oldCode,
+            subject: list[index],
+          }),
+        });
+      } catch (err) {
+        console.warn('Update subject sync err:', err);
+      }
+    }
+
     return { success: true, message: `ปรับปรุงข้อมูลรายวิชา "${newCode} ${newName}" เรียบร้อยแล้ว` };
   },
 
@@ -866,6 +905,22 @@ export const storageService = {
     const list = this.getSubjects();
     const filtered = list.filter(s => s.code.toLowerCase() !== code.toLowerCase());
     this.saveSubjects(filtered);
+
+    if (config?.scriptUrl) {
+      try {
+        await fetch(config.scriptUrl, {
+          method: 'POST',
+          mode: 'no-cors',
+          headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+          body: JSON.stringify({
+            action: 'deleteSubject',
+            code,
+          }),
+        });
+      } catch (err) {
+        console.warn('Delete subject sync err:', err);
+      }
+    }
 
     return { success: true, message: `ลบรายวิชารหัส "${code}" เรียบร้อยแล้ว` };
   },
@@ -907,13 +962,15 @@ export const storageService = {
       const json = await res.json();
 
       if (json.status === 'success' && json.data) {
-        const { submissions, teachers, assignments, sheetId } = json.data;
-        
+        const { submissions, teachers, assignments, subjects: sheetSubjects, sheetId } = json.data;
+        let formattedSubmissions: Submission[] = [];
+        let formattedAssignments: Assignment[] = [];
+
         if (Array.isArray(submissions) && submissions.length > 0) {
           const deletedIds = this.getDeletedSubmissionIds();
           const deletedKeys = this.getDeletedSubmissionKeys();
 
-          const formatted: Submission[] = submissions
+          formattedSubmissions = submissions
             .map((row: any, i: number) => ({
               id: row['รหัสการส่ง (ID)'] || row.id || `SUB-SHEET-${i}`,
               submittedAt: row['วันที่ส่งงาน'] || row.submittedAt || new Date().toLocaleString('th-TH'),
@@ -933,6 +990,8 @@ export const storageService = {
               feedback: row['คำแนะนำ/ข้อเสนอแนะ'] || row.feedback || '',
               gradedAt: row['วันที่ตรวจ'] || row.gradedAt || '',
               gradedBy: row['ผู้ตรวจ'] || row.gradedBy || '',
+              academicYear: String(row['ปีการศึกษา'] ?? row.academicYear ?? '').trim() || undefined,
+              semester: String(row['ภาคเรียน'] ?? row.semester ?? '').trim() || undefined,
             }))
             .filter((sub: Submission) => {
               if (deletedIds.has(sub.id)) return false;
@@ -947,7 +1006,7 @@ export const storageService = {
               return true;
             });
 
-          this.saveSubmissions(formatted);
+          this.saveSubmissions(formattedSubmissions);
         }
 
         if (Array.isArray(teachers) && teachers.length > 0) {
@@ -963,16 +1022,72 @@ export const storageService = {
         }
 
         if (Array.isArray(assignments) && assignments.length > 0) {
-          const formattedAssignments: Assignment[] = assignments.map((row: any, i: number) => ({
+          formattedAssignments = assignments.map((row: any, i: number) => ({
             id: row['ID'] || `A-${i}`,
             teacherName: row['ครูผู้สอน'] || '',
             subjectCode: row['รหัสวิชา'] || '',
             subjectName: row['ชื่อวิชา'] || '',
             title: row['ชื่องาน'] || '',
             maxScore: Number(row['คะแนนเต็ม'] || 10),
+            workType: row['ชนิดของงาน'] || row.workType || undefined,
+            sampleUrl: row['ตัวอย่างใบงาน'] || row.sampleUrl || undefined,
+            rubricCriteria: row['เกณฑ์การให้คะแนน'] || row.rubricCriteria || undefined,
+            academicYear: String(row['ปีการศึกษา'] ?? row.academicYear ?? '').trim() || undefined,
+            semester: String(row['ภาคเรียน'] ?? row.semester ?? '').trim() || undefined,
             createdAt: row['วันที่สร้าง'] || '',
           }));
           this.saveAssignments(formattedAssignments);
+        }
+
+        // ซิงค์รายวิชาจากชีต Subjects หรือสร้างจาก Assignments / Submissions ที่มีในชีต
+        const existingSubjects = this.getSubjects();
+        const subjectMap = new Map<string, Subject>();
+        existingSubjects.forEach(s => {
+          if (s.code) subjectMap.set(s.code.trim().toLowerCase(), s);
+        });
+        if (Array.isArray(sheetSubjects) && sheetSubjects.length > 0) {
+          sheetSubjects.forEach((row: any, i: number) => {
+            const code = String(row['รหัสวิชา'] || row.code || '').trim();
+            const name = String(row['ชื่อวิชา'] || row.name || '').trim();
+            if (!code || !name) return;
+            subjectMap.set(code.toLowerCase(), {
+              id: row['ID'] || `SUBJ-SHEET-${i}`,
+              code,
+              name,
+              teacherName: row['ครูผู้สอน'] || row.teacherName || undefined,
+              academicYear: String(row['ปีการศึกษา'] ?? row.academicYear ?? '').trim() || undefined,
+              semester: String(row['ภาคเรียน'] ?? row.semester ?? '').trim() || undefined,
+              createdAt: row['วันที่สร้าง'] || row.createdAt || '',
+            });
+          });
+        }
+        [...formattedAssignments, ...formattedSubmissions].forEach((item: any, idx: number) => {
+          const code = String(item.subjectCode || '').trim();
+          const name = String(item.subjectName || '').trim();
+          if (!code || !name) return;
+          const key = code.toLowerCase();
+          if (!subjectMap.has(key)) {
+            subjectMap.set(key, {
+              id: `SUBJ-SYNC-${idx}-${code}`,
+              code,
+              name,
+              teacherName: item.teacherName || undefined,
+              academicYear: item.academicYear || undefined,
+              semester: item.semester || undefined,
+            });
+          } else {
+            const prev = subjectMap.get(key)!;
+            if ((!prev.academicYear && item.academicYear) || (!prev.semester && item.semester)) {
+              subjectMap.set(key, {
+                ...prev,
+                academicYear: prev.academicYear || item.academicYear,
+                semester: prev.semester || item.semester,
+              });
+            }
+          }
+        });
+        if (subjectMap.size > 0) {
+          this.saveSubjects(Array.from(subjectMap.values()));
         }
 
         this.saveSheetConfig({

@@ -26,42 +26,78 @@ const SHEET_NAMES = {
   SUBMISSIONS: 'Submissions',
   TEACHERS: 'Teachers',
   ASSIGNMENTS: 'Assignments',
+  SUBJECTS: 'Subjects',
 };
+
+// ตรวจสอบและเติมหัวตารางที่ยังขาดอยู่ (เพื่อรองรับชีตเดิมที่มีอยู่แล้ว)
+function ensureHeaders(sheet, requiredHeaders) {
+  if (!sheet) return;
+  const lastCol = sheet.getLastColumn();
+  if (lastCol === 0) {
+    sheet.getRange(1, 1, 1, requiredHeaders.length).setValues([requiredHeaders]);
+    return;
+  }
+  const existingHeaders = sheet.getRange(1, 1, 1, lastCol).getValues()[0].map(function(h) { return String(h).trim(); });
+  requiredHeaders.forEach(function(h) {
+    if (existingHeaders.indexOf(h) === -1) {
+      const nextCol = sheet.getLastColumn() + 1;
+      sheet.getRange(1, nextCol).setValue(h)
+        .setFontWeight('bold')
+        .setHorizontalAlignment('center');
+    }
+  });
+}
+
+// สร้าง Map ชื่อคอลัมน์ -> ลำดับคอลัมน์ (1-indexed)
+function getHeaderMap(sheet) {
+  const lastCol = sheet.getLastColumn();
+  const map = {};
+  if (lastCol === 0) return map;
+  const headers = sheet.getRange(1, 1, 1, lastCol).getValues()[0];
+  for (var i = 0; i < headers.length; i++) {
+    map[String(headers[i]).trim()] = i + 1;
+  }
+  return map;
+}
 
 // เริ่มต้นสร้างชีตอัตโนมัติหากยังไม่มี
 function initSheets() {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
 
   // 1. ชีต Submissions (การส่งงาน)
+  const subHeaders = [
+    'รหัสการส่ง (ID)',
+    'วันที่ส่งงาน',
+    'ชื่อ-นามสกุล',
+    'เลขที่',
+    'ระดับชั้น',
+    'ห้อง',
+    'ครูผู้สอน',
+    'รหัสวิชา',
+    'ชื่อวิชา',
+    'ชื่องาน',
+    'คะแนนเต็ม',
+    'ลิงก์ผลงาน',
+    'คะแนนที่ได้',
+    'สถานะ',
+    'คำแนะนำ/ข้อเสนอแนะ',
+    'วันที่ตรวจ',
+    'ผู้ตรวจ',
+    'ปีการศึกษา',
+    'ภาคเรียน'
+  ];
   let subSheet = ss.getSheetByName(SHEET_NAMES.SUBMISSIONS);
   if (!subSheet) {
     subSheet = ss.insertSheet(SHEET_NAMES.SUBMISSIONS);
-    const headers = [
-      'รหัสการส่ง (ID)',
-      'วันที่ส่งงาน',
-      'ชื่อ-นามสกุล',
-      'เลขที่',
-      'ระดับชั้น',
-      'ห้อง',
-      'ครูผู้สอน',
-      'รหัสวิชา',
-      'ชื่อวิชา',
-      'ชื่องาน',
-      'คะแนนเต็ม',
-      'ลิงก์ผลงาน',
-      'คะแนนที่ได้',
-      'สถานะ',
-      'คำแนะนำ/ข้อเสนอแนะ',
-      'วันที่ตรวจ',
-      'ผู้ตรวจ'
-    ];
-    subSheet.getRange(1, 1, 1, headers.length).setValues([headers]);
-    subSheet.getRange(1, 1, 1, headers.length)
+    subSheet.getRange(1, 1, 1, subHeaders.length).setValues([subHeaders]);
+    subSheet.getRange(1, 1, 1, subHeaders.length)
       .setBackground('#4F46E5')
       .setFontColor('#FFFFFF')
       .setFontWeight('bold')
       .setHorizontalAlignment('center');
     subSheet.setFrozenRows(1);
+  } else {
+    ensureHeaders(subSheet, subHeaders);
   }
 
   // 2. ชีต Teachers (ครูผู้สอน)
@@ -89,12 +125,12 @@ function initSheets() {
   }
 
   // 3. ชีต Assignments (ภาระงาน/ใบงาน)
+  const assignHeaders = ['ID', 'ครูผู้สอน', 'รหัสวิชา', 'ชื่อวิชา', 'ชื่องาน', 'คะแนนเต็ม', 'ชนิดของงาน', 'ตัวอย่างใบงาน', 'วันที่สร้าง', 'ปีการศึกษา', 'ภาคเรียน', 'เกณฑ์การให้คะแนน'];
   let assignSheet = ss.getSheetByName(SHEET_NAMES.ASSIGNMENTS);
   if (!assignSheet) {
     assignSheet = ss.insertSheet(SHEET_NAMES.ASSIGNMENTS);
-    const headers = ['ID', 'ครูผู้สอน', 'รหัสวิชา', 'ชื่อวิชา', 'ชื่องาน', 'คะแนนเต็ม', 'ชนิดของงาน', 'ตัวอย่างใบงาน', 'วันที่สร้าง'];
-    assignSheet.getRange(1, 1, 1, headers.length).setValues([headers]);
-    assignSheet.getRange(1, 1, 1, headers.length)
+    assignSheet.getRange(1, 1, 1, assignHeaders.length).setValues([assignHeaders]);
+    assignSheet.getRange(1, 1, 1, assignHeaders.length)
       .setBackground('#D97706')
       .setFontColor('#FFFFFF')
       .setFontWeight('bold')
@@ -111,8 +147,29 @@ function initSheets() {
       10,
       'ผังงาน/อัลกอริทึม/Coding',
       'https://docs.google.com/presentation/d/sample',
-      new Date().toLocaleString('th-TH')
+      new Date().toLocaleString('th-TH'),
+      '2569',
+      '2',
+      'ความถูกต้องของสัญลักษณ์ Flowchart (4 คะแนน), ลำดับตรรกะและการตัดสินใจ (4 คะแนน), ความคิดสร้างสรรค์และความเรียบร้อย (2 คะแนน)'
     ]);
+  } else {
+    ensureHeaders(assignSheet, assignHeaders);
+  }
+
+  // 4. ชีต Subjects (รายวิชาที่สอน)
+  const subjectHeaders = ['ID', 'รหัสวิชา', 'ชื่อวิชา', 'ครูผู้สอน', 'ปีการศึกษา', 'ภาคเรียน', 'วันที่สร้าง'];
+  let subjectSheet = ss.getSheetByName(SHEET_NAMES.SUBJECTS);
+  if (!subjectSheet) {
+    subjectSheet = ss.insertSheet(SHEET_NAMES.SUBJECTS);
+    subjectSheet.getRange(1, 1, 1, subjectHeaders.length).setValues([subjectHeaders]);
+    subjectSheet.getRange(1, 1, 1, subjectHeaders.length)
+      .setBackground('#7C3AED')
+      .setFontColor('#FFFFFF')
+      .setFontWeight('bold')
+      .setHorizontalAlignment('center');
+    subjectSheet.setFrozenRows(1);
+  } else {
+    ensureHeaders(subjectSheet, subjectHeaders);
   }
 }
 
@@ -130,6 +187,7 @@ function doGet(e) {
     const submissions = getSheetData(ss.getSheetByName(SHEET_NAMES.SUBMISSIONS));
     const teachers = getSheetData(ss.getSheetByName(SHEET_NAMES.TEACHERS));
     const assignments = getSheetData(ss.getSheetByName(SHEET_NAMES.ASSIGNMENTS));
+    const subjects = getSheetData(ss.getSheetByName(SHEET_NAMES.SUBJECTS));
 
     return responseJSON({
       status: 'success',
@@ -137,6 +195,7 @@ function doGet(e) {
         submissions: submissions,
         teachers: teachers,
         assignments: assignments,
+        subjects: subjects,
         sheetTitle: ss.getName(),
         sheetId: ss.getId()
       }
@@ -163,26 +222,33 @@ function doPost(e) {
     // 1. ส่งงานใหม่
     if (action === 'submitWork') {
       const sheet = ss.getSheetByName(SHEET_NAMES.SUBMISSIONS);
+      const headerMap = getHeaderMap(sheet);
       const data = body.data;
-      sheet.appendRow([
-        data.id || ('SUB-' + Utilities.formatDate(new Date(), "Asia/Bangkok", "yyyyMMdd-HHmmss")),
-        data.submittedAt || new Date().toLocaleString('th-TH'),
-        data.studentName,
-        data.studentNumber,
-        data.gradeLevel,
-        data.room,
-        data.teacherName,
-        data.subjectCode,
-        data.subjectName,
-        data.assignmentName,
-        data.maxScore || 10,
-        data.workUrl,
-        data.score !== undefined && data.score !== null ? data.score : '',
-        data.status || 'รอตรวจ',
-        data.feedback || '',
-        data.gradedAt || '',
-        data.gradedBy || ''
-      ]);
+      const totalCols = sheet.getLastColumn();
+      const newRow = new Array(totalCols).fill('');
+      const setVal = function(colName, val) {
+        if (headerMap[colName]) newRow[headerMap[colName] - 1] = val;
+      };
+      setVal('รหัสการส่ง (ID)', data.id || ('SUB-' + Utilities.formatDate(new Date(), "Asia/Bangkok", "yyyyMMdd-HHmmss")));
+      setVal('วันที่ส่งงาน', data.submittedAt || new Date().toLocaleString('th-TH'));
+      setVal('ชื่อ-นามสกุล', data.studentName || '');
+      setVal('เลขที่', data.studentNumber || '');
+      setVal('ระดับชั้น', data.gradeLevel || '');
+      setVal('ห้อง', data.room || '');
+      setVal('ครูผู้สอน', data.teacherName || '');
+      setVal('รหัสวิชา', data.subjectCode || '');
+      setVal('ชื่อวิชา', data.subjectName || '');
+      setVal('ชื่องาน', data.assignmentName || '');
+      setVal('คะแนนเต็ม', data.maxScore || 10);
+      setVal('ลิงก์ผลงาน', data.workUrl || '');
+      setVal('คะแนนที่ได้', data.score !== undefined && data.score !== null ? data.score : '');
+      setVal('สถานะ', data.status || 'รอตรวจ');
+      setVal('คำแนะนำ/ข้อเสนอแนะ', data.feedback || '');
+      setVal('วันที่ตรวจ', data.gradedAt || '');
+      setVal('ผู้ตรวจ', data.gradedBy || '');
+      setVal('ปีการศึกษา', data.academicYear || '');
+      setVal('ภาคเรียน', data.semester || '');
+      sheet.appendRow(newRow);
       return responseJSON({ status: 'success', message: 'บันทึกการส่งงานสำเร็จ' });
     }
 
@@ -190,6 +256,7 @@ function doPost(e) {
     if (action === 'gradeSubmission') {
       const sheet = ss.getSheetByName(SHEET_NAMES.SUBMISSIONS);
       const rows = sheet.getDataRange().getValues();
+      const headerMap = getHeaderMap(sheet);
       const id = body.id;
       const score = body.score;
       const feedback = body.feedback || '';
@@ -199,11 +266,11 @@ function doPost(e) {
       let found = false;
       for (let i = 1; i < rows.length; i++) {
         if (String(rows[i][0]) === String(id)) {
-          sheet.getRange(i + 1, 13).setValue(score); // คะแนนที่ได้
-          sheet.getRange(i + 1, 14).setValue('ตรวจแล้ว'); // สถานะ
-          sheet.getRange(i + 1, 15).setValue(feedback); // คำแนะนำ
-          sheet.getRange(i + 1, 16).setValue(gradedAt); // วันที่ตรวจ
-          sheet.getRange(i + 1, 17).setValue(gradedBy); // ผู้ตรวจ
+          sheet.getRange(i + 1, headerMap['คะแนนที่ได้'] || 13).setValue(score);
+          sheet.getRange(i + 1, headerMap['สถานะ'] || 14).setValue('ตรวจแล้ว');
+          sheet.getRange(i + 1, headerMap['คำแนะนำ/ข้อเสนอแนะ'] || 15).setValue(feedback);
+          sheet.getRange(i + 1, headerMap['วันที่ตรวจ'] || 16).setValue(gradedAt);
+          sheet.getRange(i + 1, headerMap['ผู้ตรวจ'] || 17).setValue(gradedBy);
           found = true;
           break;
         }
@@ -232,19 +299,27 @@ function doPost(e) {
     // 4. บันทึกงานใหม่โดยครู
     if (action === 'saveAssignment') {
       const sheet = ss.getSheetByName(SHEET_NAMES.ASSIGNMENTS);
+      const headerMap = getHeaderMap(sheet);
+      const totalCols = sheet.getLastColumn();
       const items = body.assignments || [body.assignment];
       items.forEach(function(a) {
-        sheet.appendRow([
-          a.id || ('A-' + Utilities.formatDate(new Date(), "Asia/Bangkok", "yyyyMMddHHmmss")),
-          a.teacherName,
-          a.subjectCode,
-          a.subjectName,
-          a.title,
-          a.maxScore,
-          a.workType || 'ใบงาน/แบบฝึกหัด',
-          a.sampleUrl || '',
-          new Date().toLocaleString('th-TH')
-        ]);
+        const newRow = new Array(totalCols).fill('');
+        const setVal = function(colName, val) {
+          if (headerMap[colName]) newRow[headerMap[colName] - 1] = val;
+        };
+        setVal('ID', a.id || ('A-' + Utilities.formatDate(new Date(), "Asia/Bangkok", "yyyyMMddHHmmss")));
+        setVal('ครูผู้สอน', a.teacherName || '');
+        setVal('รหัสวิชา', a.subjectCode || '');
+        setVal('ชื่อวิชา', a.subjectName || '');
+        setVal('ชื่องาน', a.title || '');
+        setVal('คะแนนเต็ม', a.maxScore || 10);
+        setVal('ชนิดของงาน', a.workType || 'ใบงาน/แบบฝึกหัด');
+        setVal('ตัวอย่างใบงาน', a.sampleUrl || '');
+        setVal('วันที่สร้าง', a.createdAt || new Date().toLocaleString('th-TH'));
+        setVal('ปีการศึกษา', a.academicYear || '');
+        setVal('ภาคเรียน', a.semester || '');
+        setVal('เกณฑ์การให้คะแนน', a.rubricCriteria || '');
+        sheet.appendRow(newRow);
       });
       return responseJSON({ status: 'success', message: 'บันทึกข้อมูลงานสำเร็จ' });
     }
@@ -267,16 +342,20 @@ function doPost(e) {
     if (action === 'updateAssignment') {
       const sheet = ss.getSheetByName(SHEET_NAMES.ASSIGNMENTS);
       const rows = sheet.getDataRange().getValues();
+      const headerMap = getHeaderMap(sheet);
       const a = body.assignment;
       let found = false;
       for (let i = 1; i < rows.length; i++) {
         if (String(rows[i][0]) === String(a.id)) {
-          sheet.getRange(i + 1, 3).setValue(a.subjectCode);
-          sheet.getRange(i + 1, 4).setValue(a.subjectName);
-          sheet.getRange(i + 1, 5).setValue(a.title);
-          sheet.getRange(i + 1, 6).setValue(a.maxScore);
-          sheet.getRange(i + 1, 7).setValue(a.workType || 'ใบงาน/แบบฝึกหัด');
-          sheet.getRange(i + 1, 8).setValue(a.sampleUrl || '');
+          sheet.getRange(i + 1, headerMap['รหัสวิชา'] || 3).setValue(a.subjectCode);
+          sheet.getRange(i + 1, headerMap['ชื่อวิชา'] || 4).setValue(a.subjectName);
+          sheet.getRange(i + 1, headerMap['ชื่องาน'] || 5).setValue(a.title);
+          sheet.getRange(i + 1, headerMap['คะแนนเต็ม'] || 6).setValue(a.maxScore);
+          sheet.getRange(i + 1, headerMap['ชนิดของงาน'] || 7).setValue(a.workType || 'ใบงาน/แบบฝึกหัด');
+          sheet.getRange(i + 1, headerMap['ตัวอย่างใบงาน'] || 8).setValue(a.sampleUrl || '');
+          if (headerMap['ปีการศึกษา']) sheet.getRange(i + 1, headerMap['ปีการศึกษา']).setValue(a.academicYear || '');
+          if (headerMap['ภาคเรียน']) sheet.getRange(i + 1, headerMap['ภาคเรียน']).setValue(a.semester || '');
+          if (headerMap['เกณฑ์การให้คะแนน']) sheet.getRange(i + 1, headerMap['เกณฑ์การให้คะแนน']).setValue(a.rubricCriteria || '');
           found = true;
           break;
         }
@@ -285,6 +364,53 @@ function doPost(e) {
         status: found ? 'success' : 'not_found', 
         message: found ? 'แก้ไขข้อมูลงานและวิชาสำเร็จ' : 'ไม่พบงานที่ต้องการแก้ไข' 
       });
+    }
+
+    // 5.2 จัดการรายวิชา (บันทึก/แก้ไข/ลบรายวิชา พร้อมปีการศึกษาและภาคเรียน)
+    if (action === 'saveSubject') {
+      const sheet = ss.getSheetByName(SHEET_NAMES.SUBJECTS);
+      const s = body.subject;
+      sheet.appendRow([
+        s.id || ('SUBJ-' + Utilities.formatDate(new Date(), "Asia/Bangkok", "yyyyMMddHHmmss")),
+        s.code || '',
+        s.name || '',
+        s.teacherName || '',
+        s.academicYear || '',
+        s.semester || '',
+        s.createdAt || new Date().toLocaleString('th-TH')
+      ]);
+      return responseJSON({ status: 'success', message: 'บันทึกรายวิชาสำเร็จ' });
+    }
+
+    if (action === 'updateSubject') {
+      const sheet = ss.getSheetByName(SHEET_NAMES.SUBJECTS);
+      const rows = sheet.getDataRange().getValues();
+      const s = body.subject;
+      const oldCode = String(body.oldCode || s.code || '').trim().toLowerCase();
+      let found = false;
+      for (let i = 1; i < rows.length; i++) {
+        if (String(rows[i][1] || '').trim().toLowerCase() === oldCode) {
+          sheet.getRange(i + 1, 2).setValue(s.code);
+          sheet.getRange(i + 1, 3).setValue(s.name);
+          if (s.academicYear !== undefined) sheet.getRange(i + 1, 5).setValue(s.academicYear);
+          if (s.semester !== undefined) sheet.getRange(i + 1, 6).setValue(s.semester);
+          found = true;
+          break;
+        }
+      }
+      return responseJSON({ status: found ? 'success' : 'not_found', message: found ? 'แก้ไขรายวิชาสำเร็จ' : 'ไม่พบรายวิชา' });
+    }
+
+    if (action === 'deleteSubject') {
+      const sheet = ss.getSheetByName(SHEET_NAMES.SUBJECTS);
+      const rows = sheet.getDataRange().getValues();
+      const code = String(body.code || '').trim().toLowerCase();
+      for (let i = rows.length - 1; i >= 1; i--) {
+        if (String(rows[i][1] || '').trim().toLowerCase() === code) {
+          sheet.deleteRow(i + 1);
+        }
+      }
+      return responseJSON({ status: 'success', message: 'ลบรายวิชาสำเร็จ' });
     }
 
     // 6. ลบข้อมูลการส่งงานของนักเรียน (ลบงานเดี่ยว / งานส่งซ้ำ)
