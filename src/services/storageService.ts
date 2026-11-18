@@ -392,6 +392,11 @@ export const storageService = {
       gradeLevel?: GradeLevel;
       room?: string;
       workUrl?: string;
+      assignmentName?: string;
+      subjectCode?: string;
+      subjectName?: string;
+      academicYear?: string;
+      semester?: string;
     },
     config?: GoogleSheetConfig
   ): Promise<{ success: boolean; message: string }> {
@@ -405,7 +410,12 @@ export const storageService = {
       studentNumber: data.studentNumber.trim(),
       ...(data.gradeLevel ? { gradeLevel: data.gradeLevel } : {}),
       ...(data.room ? { room: data.room } : {}),
-      ...(data.workUrl ? { workUrl: data.workUrl.trim() } : {}),
+      ...(data.workUrl !== undefined ? { workUrl: data.workUrl.trim() } : {}),
+      ...(data.assignmentName !== undefined ? { assignmentName: data.assignmentName.trim() } : {}),
+      ...(data.subjectCode !== undefined ? { subjectCode: data.subjectCode.trim() } : {}),
+      ...(data.subjectName !== undefined ? { subjectName: data.subjectName.trim() } : {}),
+      ...(data.academicYear !== undefined ? { academicYear: data.academicYear.trim() } : {}),
+      ...(data.semester !== undefined ? { semester: data.semester.trim() } : {}),
     };
     this.saveSubmissions(list);
 
@@ -426,7 +436,7 @@ export const storageService = {
       }
     }
 
-    return { success: true, message: 'ปรับปรุงข้อมูลนักเรียนเรียบร้อยแล้ว' };
+    return { success: true, message: 'ปรับปรุงข้อมูลและงานที่ส่งเรียบร้อยแล้ว' };
   },
 
   // --- TEACHERS ---

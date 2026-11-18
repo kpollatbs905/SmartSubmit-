@@ -116,6 +116,23 @@ export default function TeacherPortalView({
     return s1 === s2 || s1.includes(s2) || s2.includes(s1);
   };
 
+  // Helper ค้นหานักเรียนแบบรองรับทั้งพิมพ์คำนำหน้า (ด.ช./ด.ญ./นาย/น.ส.) และไม่พิมพ์คำนำหน้า
+  const matchesStudentSearch = (
+    query: string,
+    studentName?: string,
+    studentNumber?: string,
+    ...extras: Array<string | undefined>
+  ) => {
+    const q = query.trim().toLowerCase();
+    if (!q) return true;
+    const qNoPrefix = stripThaiPrefix(query).toLowerCase();
+    const rawName = (studentName || '').toLowerCase();
+    const noPrefixName = stripThaiPrefix(studentName || '').toLowerCase();
+    if (rawName.includes(q) || (qNoPrefix && noPrefixName.includes(qNoPrefix))) return true;
+    if (studentNumber && studentNumber.toLowerCase().includes(q)) return true;
+    return extras.some(ex => ex && ex.toLowerCase().includes(q));
+  };
+
   // Subject Management States (Declared early for use in teacherSubjects computation)
   const [subjects, setSubjects] = useState<Subject[]>(() => storageService.getSubjects());
   const [selectedSubjectSelect, setSelectedSubjectSelect] = useState<string>('');
@@ -402,7 +419,9 @@ export default function TeacherPortalView({
   } | null>(null);
 
   // Student Data & Deletion Management States (สลับดู Roster จาก Excel หรือ Submissions)
-  const [studentManageViewMode, setStudentManageViewMode] = useState<'roster' | 'submissions'>('roster');
+  const [studentManageViewMode, setStudentManageViewMode] = useState<'roster' | 'submissions'>(() =>
+    storageService.getStudentRoster().length > 0 ? 'roster' : 'submissions'
+  );
   const [studentManageYear, setStudentManageYear] = useState<string>(latestYear);
   const [studentManageSemester, setStudentManageSemester] = useState<string>(latestSemester);
   const [studentManageGrade, setStudentManageGrade] = useState<string>('ALL');
@@ -487,6 +506,12 @@ export default function TeacherPortalView({
 
   // Inline grading inputs: mapping submissionId -> { score, feedback }
   const [gradingScores, setGradingScores] = useState<Record<string, { score: string; feedback: string }>>({});
+
+  // Batch teacher grading ("ใช้คะแนนครูประเมินทุกคน") states
+  const [batchTeacherScore, setBatchTeacherScore] = useState<string>('');
+  const [batchTeacherFeedback, setBatchTeacherFeedback] = useState<string>('');
+  const [batchTeacherScope, setBatchTeacherScope] = useState<'all' | 'pending'>('all');
+  const [isBatchTeacherGrading, setIsBatchTeacherGrading] = useState<boolean>(false);
 
   // Custom AI Grading Criteria (teacher-defined rubric, persisted in localStorage globally & per-assignment)
   const criteriaStorageKey = `teacher_custom_ai_criteria_${activeTeacher?.id || 'default'}`;
@@ -743,7 +768,7 @@ export default function TeacherPortalView({
   // Edit Assignment State
   const [editingAssignment, setEditingAssignment] = useState<Assignment | null>(null);
 
-  // Edit Student Info State
+  // Edit Student / Submission Info State
   const [editingStudentSub, setEditingStudentSub] = useState<{
     id: string;
     studentName: string;
@@ -752,6 +777,10 @@ export default function TeacherPortalView({
     room: string;
     workUrl: string;
     assignmentName: string;
+    subjectCode: string;
+    subjectName: string;
+    academicYear: string;
+    semester: string;
   } | null>(null);
 
   // -------------------------------------------------------------
@@ -1384,7 +1413,7 @@ export default function TeacherPortalView({
   };
 
   // -------------------------------------------------------------
-  // STUDENT SUBMISSION MANAGEMENT (แก้ไขข้อมูลนักเรียน / ลบชื่อนักเรียน)
+  // STUDENT SUBMISSION MANAGEMENT (แก้ไขข้อมูลนักเรียน / งานที่ส่ง / ลบ)
   // -------------------------------------------------------------
   const handleOpenEditStudent = (sub: Submission) => {
     setEditingStudentSub({
@@ -1394,7 +1423,11 @@ export default function TeacherPortalView({
       gradeLevel: sub.gradeLevel,
       room: sub.room,
       workUrl: sub.workUrl || '',
-      assignmentName: sub.assignmentName,
+      assignmentName: sub.assignmentName || '',
+      subjectCode: sub.subjectCode || '',
+      subjectName: sub.subjectName || '',
+      academicYear: sub.academicYear || latestYear || '2569',
+      semester: sub.semester || latestSemester || '2',
     });
   };
 
@@ -1410,8 +1443,12 @@ export default function TeacherPortalView({
       alertService.error('กรุณาระบุเลขที่', 'เลขที่นักเรียนห้ามเว้นว่าง');
       return;
     }
+    if (!editingStudentSub.assignmentName.trim()) {
+      alertService.error('กรุณาระบุชื่องาน', 'ชื่องานที่ส่งห้ามเว้นว่าง');
+      return;
+    }
 
-    alertService.loading('กำลังบันทึกข้อมูล...', 'ระบบกำลังบันทึกการแก้ไขข้อมูลนักเรียน');
+    alertService.loading('กำลังบันทึกข้อมูล...', 'ระบบกำลังบันทึกการแก้ไขข้อมูลและงานที่ส่ง');
     const res = await storageService.updateSubmissionStudent(
       editingStudentSub.id,
       {
@@ -1420,15 +1457,21 @@ export default function TeacherPortalView({
         gradeLevel: editingStudentSub.gradeLevel,
         room: editingStudentSub.room,
         workUrl: editingStudentSub.workUrl.trim(),
+        assignmentName: editingStudentSub.assignmentName.trim(),
+        subjectCode: editingStudentSub.subjectCode.trim(),
+        subjectName: editingStudentSub.subjectName.trim(),
+        academicYear: editingStudentSub.academicYear.trim(),
+        semester: editingStudentSub.semester.trim(),
       },
       sheetConfig
     );
     alertService.close();
 
     if (res.success) {
+      const updatedName = editingStudentSub.studentName;
       setEditingStudentSub(null);
       onSubmissionsChange();
-      await alertService.success('แก้ไขข้อมูลสำเร็จ! 🎉', `อัปเดตข้อมูลของ "${editingStudentSub.studentName}" เรียบร้อยแล้ว`);
+      await alertService.success('แก้ไขข้อมูลสำเร็จ! 🎉', `อัปเดตข้อมูลและงานที่ส่งของ "${updatedName}" เรียบร้อยแล้ว`);
     } else {
       alertService.error('เกิดข้อผิดพลาด', res.message);
     }
@@ -1465,7 +1508,7 @@ export default function TeacherPortalView({
 
     if (result.isConfirmed) {
       alertService.loading('กำลังลบข้อมูล...', 'ระบบกำลังลบข้อมูลการส่งงานของนักเรียน');
-      await storageService.deleteSubmission(sub.id, sheetConfig);
+      await storageService.deleteSubmission(sub, sheetConfig);
       onSubmissionsChange();
       alertService.close();
       alertService.success('ลบข้อมูลเรียบร้อยแล้ว', `ลบข้อมูลของ "${sub.studentName}" ออกจากระบบแล้ว`);
@@ -1796,14 +1839,14 @@ export default function TeacherPortalView({
         (filterAiStatus === 'EVALUATED' && hasAiEvaluation) || 
         (filterAiStatus === 'PENDING' && !hasAiEvaluation);
       
-      // 7. Search query match
-      const q = gradingSearch.trim().toLowerCase();
-      const matchQuery = !q || (
-        s.studentName.toLowerCase().includes(q) ||
-        s.studentNumber.toLowerCase().includes(q) ||
-        s.assignmentName.toLowerCase().includes(q) ||
-        (s.subjectCode && s.subjectCode.toLowerCase().includes(q)) ||
-        (s.subjectName && s.subjectName.toLowerCase().includes(q))
+      // 7. Search query match (รองรับการพิมพ์ชื่อแบบมีและไม่มีคำนำหน้า)
+      const matchQuery = matchesStudentSearch(
+        gradingSearch,
+        s.studentName,
+        s.studentNumber,
+        s.assignmentName,
+        s.subjectCode,
+        s.subjectName
       );
 
       return matchTeacher && matchYear && matchSemester && matchSubject && matchAssignment && matchGrade && matchRoom && matchStatus && matchAi && matchQuery;
@@ -1948,12 +1991,8 @@ export default function TeacherPortalView({
       if (filterAiStatus === 'EVALUATED' && (!item.isSubmitted || !item.aiEvaluation || item.aiEvaluation.suggestedScore === undefined)) return false;
       if (filterAiStatus === 'PENDING' && (!item.isSubmitted || (item.aiEvaluation && item.aiEvaluation.suggestedScore !== undefined))) return false;
 
-      const q = gradingSearch.trim().toLowerCase();
-      if (q) {
-        const matchName = item.studentName.toLowerCase().includes(q);
-        const matchNum = item.studentNumber.toLowerCase().includes(q);
-        const matchAssign = item.assignmentName.toLowerCase().includes(q);
-        if (!matchName && !matchNum && !matchAssign) return false;
+      if (!matchesStudentSearch(gradingSearch, item.studentName, item.studentNumber, item.assignmentName)) {
+        return false;
       }
 
       return true;
@@ -1969,6 +2008,36 @@ export default function TeacherPortalView({
     const waitingCount = gradingUnifiedItems.filter(i => i.isSubmitted && i.status === 'รอตรวจ').length;
     return { totalInClass, submittedCount, missingCount, gradedCount, waitingCount };
   }, [gradingRoomStudents.length, gradingUnifiedItems]);
+
+  // ข้อมูลเป้าหมายสำหรับ "ใช้คะแนนครูประเมินทุกคน"
+  const teacherPendingSubmissions = useMemo(() => {
+    return teacherSubmissions.filter(s => s.status !== 'ตรวจแล้ว' || s.score === null || s.score === undefined);
+  }, [teacherSubmissions]);
+
+  const batchTeacherTargets = useMemo(() => {
+    return batchTeacherScope === 'pending' ? teacherPendingSubmissions : teacherSubmissions;
+  }, [batchTeacherScope, teacherPendingSubmissions, teacherSubmissions]);
+
+  const batchReferenceMaxScore = useMemo(() => {
+    if (batchTeacherTargets.length > 0) {
+      return Math.max(...batchTeacherTargets.map(s => Number(s.maxScore) || 10));
+    }
+    if (teacherSubmissions.length > 0) {
+      return Math.max(...teacherSubmissions.map(s => Number(s.maxScore) || 10));
+    }
+    if (filterAssignment !== 'ALL') {
+      const matched = assignments.find(a => a.title.trim() === filterAssignment.trim());
+      if (matched?.maxScore) return matched.maxScore;
+    }
+    return 10;
+  }, [batchTeacherTargets, teacherSubmissions, filterAssignment, assignments]);
+
+  const editedInlineGradingCount = useMemo(() => {
+    return teacherSubmissions.filter(sub => {
+      const entry = gradingScores[sub.id];
+      return entry !== undefined && entry.score !== '' && !isNaN(Number(entry.score));
+    }).length;
+  }, [teacherSubmissions, gradingScores]);
 
   // คัดลอกคนค้างส่งในหน้าตรวจงาน
   const handleCopyMissingStudentsInGrading = () => {
@@ -2282,6 +2351,225 @@ export default function TeacherPortalView({
     onSubmissionsChange();
   };
 
+  // นำคะแนนจากช่องครูให้คะแนน ไปใส่ในช่องคะแนนของนักเรียนทุกคนในตาราง (เพื่อตรวจทานก่อนบันทึก)
+  const handleFillTeacherScoresToInputs = () => {
+    if (batchTeacherTargets.length === 0) {
+      alertService.info('ไม่มีรายการสำหรับให้คะแนน', 'ไม่พบนักเรียนที่ส่งงานตามตัวกรองที่เลือก');
+      return;
+    }
+    if (batchTeacherScore.trim() === '' || isNaN(Number(batchTeacherScore))) {
+      alertService.error('กรุณากรอกคะแนนครู', 'โปรดระบุตัวเลขคะแนนในช่อง "คะแนนครู" ก่อน');
+      return;
+    }
+    const rawScore = Number(batchTeacherScore);
+    if (rawScore < 0 || rawScore > batchReferenceMaxScore) {
+      alertService.error(
+        `คะแนนต้องอยู่ระหว่าง 0 ถึง ${batchReferenceMaxScore}`,
+        `คะแนนเต็มสูงสุดในรายการนี้คือ ${batchReferenceMaxScore} คะแนน`
+      );
+      return;
+    }
+
+    const updates: Record<string, { score: string; feedback: string }> = {};
+    batchTeacherTargets.forEach(sub => {
+      const cappedScore = Math.min(rawScore, Number(sub.maxScore) || 10);
+      updates[sub.id] = {
+        score: String(cappedScore),
+        feedback: batchTeacherFeedback.trim() !== '' ? batchTeacherFeedback.trim() : (sub.feedback || ''),
+      };
+    });
+
+    setGradingScores(prev => ({
+      ...prev,
+      ...updates,
+    }));
+
+    alertService.success(
+      'ใส่คะแนนครูลงช่องทุกคนแล้ว!',
+      `กรอกคะแนน ${rawScore} ให้แก่นักเรียนจำนวน ${batchTeacherTargets.length} คนในตารางเรียบร้อย สามารถปรับแก้รายบุคคลหรือกด "💾 บันทึกทั้งหมดในตาราง" ได้ทันที`
+    );
+  };
+
+  // ใช้คะแนนครูประเมินและบันทึกคะแนนให้ทุกคนทันที
+  const handleBatchTeacherGradeAll = async () => {
+    if (batchTeacherTargets.length === 0) {
+      alertService.info('ไม่มีรายการสำหรับให้คะแนน', 'ไม่พบนักเรียนที่ส่งงานตามเงื่อนไขที่เลือก');
+      return;
+    }
+    if (batchTeacherScore.trim() === '' || isNaN(Number(batchTeacherScore))) {
+      alertService.error('กรุณากรอกคะแนนครู', 'โปรดระบุคะแนนในช่อง "คะแนนครู" เพื่อใช้ประเมินทุกคน');
+      return;
+    }
+    const rawScore = Number(batchTeacherScore);
+    if (rawScore < 0 || rawScore > batchReferenceMaxScore) {
+      alertService.error(
+        `คะแนนต้องอยู่ระหว่าง 0 ถึง ${batchReferenceMaxScore}`,
+        `คะแนนเต็มสูงสุดในรายการนี้คือ ${batchReferenceMaxScore} คะแนน`
+      );
+      return;
+    }
+
+    const confirmRes = await Swal.fire({
+      title: 'ยืนยันใช้คะแนนครูประเมินทุกคน?',
+      html: `
+        <div class="text-sm text-left space-y-2 bg-emerald-50/70 p-4 rounded-2xl border border-emerald-200">
+          <p>👨‍🏫 <b>คะแนนที่จะให้:</b> <span class="text-emerald-700 font-black text-base">${rawScore}</span> / ${batchReferenceMaxScore} คะแนน</p>
+          <p>👥 <b>จำนวนนักเรียน:</b> <span class="font-bold text-indigo-800">${batchTeacherTargets.length} คน</span> (${batchTeacherScope === 'pending' ? 'เฉพาะรอตรวจ' : 'ทุกคนที่ส่งงานตามตัวกรอง'})</p>
+          ${batchTeacherFeedback.trim() ? `<p>💬 <b>ข้อเสนอแนะครู:</b> ${batchTeacherFeedback.trim()}</p>` : ''}
+          <p class="text-xs text-gray-500 pt-1">ระบบจะอัปเดตสถานะเป็น "✅ ตรวจแล้ว" และบันทึกข้อมูลลงฐานข้อมูลและ Google Sheet ให้อัตโนมัติ</p>
+        </div>
+      `,
+      icon: 'question',
+      showCancelButton: true,
+      confirmButtonText: `✅ ยืนยันให้คะแนนทุกคน (${batchTeacherTargets.length} คน)`,
+      cancelButtonText: 'ยกเลิก',
+      confirmButtonColor: '#059669',
+      customClass: {
+        popup: 'rounded-3xl font-[\'Kanit\',sans-serif]',
+      },
+    });
+
+    if (!confirmRes.isConfirmed) return;
+
+    setIsBatchTeacherGrading(true);
+    let savedCount = 0;
+    const total = batchTeacherTargets.length;
+    const teacherName = activeTeacher?.fullName || 'ครูผู้สอน';
+    const inputUpdates: Record<string, { score: string; feedback: string }> = {};
+
+    Swal.fire({
+      title: 'กำลังบันทึกคะแนนครูให้ทุกคน...',
+      html: `<div class="text-sm">ดำเนินการแล้ว <b id="batch-grade-progress">0</b> / ${total} คน</div>`,
+      allowOutsideClick: false,
+      didOpen: () => {
+        Swal.showLoading();
+      },
+      customClass: {
+        popup: 'rounded-3xl font-[\'Kanit\',sans-serif]',
+      },
+    });
+
+    try {
+      const CHUNK_SIZE = 4;
+      for (let i = 0; i < batchTeacherTargets.length; i += CHUNK_SIZE) {
+        const chunk = batchTeacherTargets.slice(i, i + CHUNK_SIZE);
+        await Promise.all(
+          chunk.map(async (sub) => {
+            const finalScore = Math.min(rawScore, Number(sub.maxScore) || 10);
+            const finalFeedback =
+              batchTeacherFeedback.trim() !== ''
+                ? batchTeacherFeedback.trim()
+                : (sub.feedback || '');
+            inputUpdates[sub.id] = {
+              score: String(finalScore),
+              feedback: finalFeedback,
+            };
+            await storageService.gradeSubmission(
+              sub.id,
+              finalScore,
+              finalFeedback,
+              teacherName,
+              sheetConfig
+            );
+            savedCount++;
+          })
+        );
+        const progressEl = document.getElementById('batch-grade-progress');
+        if (progressEl) progressEl.textContent = String(savedCount);
+      }
+
+      setGradingScores(prev => ({
+        ...prev,
+        ...inputUpdates,
+      }));
+      onSubmissionsChange();
+
+      await Swal.fire({
+        title: 'ประเมินและบันทึกคะแนนทุกคนสำเร็จ! 🎉',
+        html: `<p class="text-sm">บันทึกคะแนนครู <b>${rawScore}</b> คะแนน ให้แก่นักเรียนจำนวน <b>${savedCount}</b> คน เรียบร้อยแล้ว</p>`,
+        icon: 'success',
+        confirmButtonText: 'ตกลง',
+        confirmButtonColor: '#059669',
+        customClass: {
+          popup: 'rounded-3xl font-[\'Kanit\',sans-serif]',
+        },
+      });
+    } catch (err) {
+      console.error('Batch teacher grade error:', err);
+      alertService.error('เกิดข้อผิดพลาดในการบันทึกคะแนน', 'บันทึกได้บางส่วน กรุณาลองใหม่อีกครั้ง');
+    } finally {
+      setIsBatchTeacherGrading(false);
+    }
+  };
+
+  // บันทึกคะแนนทั้งหมดที่กรอกหรือแก้ไขไว้ในช่องตาราง
+  const handleSaveAllInlineGradingScores = async () => {
+    const targets = teacherSubmissions.filter(sub => {
+      const entry = gradingScores[sub.id];
+      return entry !== undefined && entry.score !== '' && !isNaN(Number(entry.score));
+    });
+
+    if (targets.length === 0) {
+      alertService.info('ยังไม่มีคะแนนที่แก้ไขในตาราง', 'กรุณากรอกคะแนนในช่องหรือกด "📝 ใส่ช่องทุกคน" ก่อน');
+      return;
+    }
+
+    for (const sub of targets) {
+      const num = Number(gradingScores[sub.id].score);
+      if (num < 0 || num > sub.maxScore) {
+        alertService.error(
+          `คะแนนของ ${sub.studentName} ไม่ถูกต้อง`,
+          `คะแนนต้องอยู่ระหว่าง 0 ถึง ${sub.maxScore} คะแนน`
+        );
+        return;
+      }
+    }
+
+    setIsBatchTeacherGrading(true);
+    let savedCount = 0;
+    const teacherName = activeTeacher?.fullName || 'ครูผู้สอน';
+
+    Swal.fire({
+      title: 'กำลังบันทึกคะแนนจากตารางทุกคน...',
+      html: `<div class="text-sm">ดำเนินการแล้ว <b id="inline-batch-progress">0</b> / ${targets.length} คน</div>`,
+      allowOutsideClick: false,
+      didOpen: () => {
+        Swal.showLoading();
+      },
+      customClass: {
+        popup: 'rounded-3xl font-[\'Kanit\',sans-serif]',
+      },
+    });
+
+    try {
+      const CHUNK_SIZE = 4;
+      for (let i = 0; i < targets.length; i += CHUNK_SIZE) {
+        const chunk = targets.slice(i, i + CHUNK_SIZE);
+        await Promise.all(
+          chunk.map(async (sub) => {
+            const entry = gradingScores[sub.id];
+            const scoreNum = Number(entry.score);
+            const feedback = entry.feedback !== undefined ? entry.feedback : (sub.feedback || '');
+            await storageService.gradeSubmission(sub.id, scoreNum, feedback, teacherName, sheetConfig);
+            savedCount++;
+          })
+        );
+        const progressEl = document.getElementById('inline-batch-progress');
+        if (progressEl) progressEl.textContent = String(savedCount);
+      }
+      onSubmissionsChange();
+      await alertService.success(
+        'บันทึกคะแนนทั้งหมดเรียบร้อย!',
+        `บันทึกคะแนนให้แก่นักเรียนจำนวน ${savedCount} คน ลงในระบบและ Google Sheet แล้ว`
+      );
+    } catch (err) {
+      console.error('Inline batch grade error:', err);
+      alertService.error('เกิดข้อผิดพลาดในการบันทึกคะแนน', 'กรุณาลองใหม่อีกครั้ง');
+    } finally {
+      setIsBatchTeacherGrading(false);
+    }
+  };
+
   const handleExportExcel = () => {
     if (teacherSubmissions.length === 0) {
       alertService.info('ไม่มีข้อมูลสำหรับการส่งออก', 'กรุณาตรวจสอบตัวกรองข้อมูล หรือยังไม่มีนักเรียนส่งงาน');
@@ -2342,12 +2630,7 @@ export default function TeacherPortalView({
         const matchAssignment = reportAssignment === 'ALL' || s.assignmentId === reportAssignment || s.assignmentName === reportAssignment;
         const effectiveStatus = s.status || (s.score !== null && s.score !== undefined ? 'ตรวจแล้ว' : 'รอตรวจ');
         const matchStatus = reportStatus === 'ALL' || effectiveStatus === reportStatus;
-        const q = reportSearch.trim().toLowerCase();
-        const matchQuery = !q || (
-          s.studentName.toLowerCase().includes(q) ||
-          s.studentNumber.toLowerCase().includes(q) ||
-          s.assignmentName.toLowerCase().includes(q)
-        );
+        const matchQuery = matchesStudentSearch(reportSearch, s.studentName, s.studentNumber, s.assignmentName);
         return matchTeacher && matchYear && matchSemester && matchGrade && matchRoom && matchSubject && matchAssignment && matchStatus && matchQuery;
       })
       .sort((a, b) => {
@@ -2490,12 +2773,8 @@ export default function TeacherPortalView({
       if (reportFilterStatus === 'WAITING' && (!item.isSubmitted || item.status !== 'รอตรวจ')) return false;
 
       // 2. Search query filter
-      const q = reportSearch.trim().toLowerCase();
-      if (q) {
-        const matchName = item.studentName.toLowerCase().includes(q);
-        const matchNum = item.studentNumber.toLowerCase().includes(q);
-        const matchAssign = item.assignmentName.toLowerCase().includes(q);
-        if (!matchName && !matchNum && !matchAssign) return false;
+      if (!matchesStudentSearch(reportSearch, item.studentName, item.studentNumber, item.assignmentName)) {
+        return false;
       }
 
       return true;
@@ -2679,24 +2958,24 @@ export default function TeacherPortalView({
   const manageStudentSubmissions = React.useMemo(() => {
     return submissions
       .filter(s => {
-        const matchTeacher = !activeTeacher || matchesTeacher(s.teacherName, activeTeacher.fullName);
-        const subYear = (s.academicYear && s.academicYear.trim()) || '2567';
-        const matchYear = studentManageYear === 'ALL' || subYear === studentManageYear;
-        const subSemester = (s.semester && s.semester.trim()) || '1';
-        const matchSemester = studentManageSemester === 'ALL' || subSemester === studentManageSemester;
-        const matchGrade = studentManageGrade === 'ALL' || s.gradeLevel === studentManageGrade;
-        const matchRoom = studentManageRoom === 'ALL' || s.room === studentManageRoom;
+        const matchTeacher = !activeTeacher || matchesTeacher(s.teacherName, activeTeacher.fullName) || (s.subjectCode && teacherSubjects.some(([code]) => code === s.subjectCode));
+        const subYear = (s.academicYear && s.academicYear.trim()) || '';
+        const matchYear = studentManageYear === 'ALL' || !subYear || subYear === studentManageYear;
+        const subSemester = (s.semester && s.semester.trim()) || '';
+        const matchSemester = studentManageSemester === 'ALL' || !subSemester || subSemester === studentManageSemester;
+        const matchGrade = studentManageGrade === 'ALL' || normalizeGradeLevel(s.gradeLevel) === normalizeGradeLevel(studentManageGrade);
+        const matchRoom = studentManageRoom === 'ALL' || normalizeRoom(s.room) === normalizeRoom(studentManageRoom);
         const matchSubject = studentManageSubject === 'ALL' || 
           s.subjectCode === studentManageSubject ||
           s.subjectName === studentManageSubject ||
           (s.subjectCode && studentManageSubject.includes(s.subjectCode));
-        const q = studentManageSearch.trim().toLowerCase();
-        const matchQuery = !q || (
-          s.studentName.toLowerCase().includes(q) ||
-          s.studentNumber.toLowerCase().includes(q) ||
-          s.assignmentName.toLowerCase().includes(q) ||
-          s.subjectCode.toLowerCase().includes(q) ||
-          s.subjectName.toLowerCase().includes(q)
+        const matchQuery = matchesStudentSearch(
+          studentManageSearch,
+          s.studentName,
+          s.studentNumber,
+          s.assignmentName,
+          s.subjectCode,
+          s.subjectName
         );
         return matchTeacher && matchYear && matchSemester && matchGrade && matchRoom && matchSubject && matchQuery;
       })
@@ -2714,17 +2993,16 @@ export default function TeacherPortalView({
         }
         return a.studentNumber.localeCompare(b.studentNumber);
       });
-  }, [submissions, activeTeacher, studentManageYear, studentManageSemester, studentManageGrade, studentManageRoom, studentManageSubject, studentManageSearch]);
+  }, [submissions, activeTeacher, teacherSubjects, studentManageYear, studentManageSemester, studentManageGrade, studentManageRoom, studentManageSubject, studentManageSearch]);
 
   // บัญชีรายชื่อนักเรียน (Roster) ที่กรองสำหรับหน้าจัดการข้อมูลนักเรียน
   const filteredRosterList = useMemo(() => {
     return rosterList.filter(r => {
-      const matchYear = studentManageYear === 'ALL' || r.academicYear === studentManageYear;
-      const matchSem = studentManageSemester === 'ALL' || r.semester === studentManageSemester;
-      const matchGrade = studentManageGrade === 'ALL' || r.gradeLevel === studentManageGrade;
-      const matchRoom = studentManageRoom === 'ALL' || r.room === studentManageRoom;
-      const q = studentManageSearch.trim().toLowerCase();
-      const matchSearch = !q || r.studentName.toLowerCase().includes(q) || r.studentNumber.toLowerCase().includes(q);
+      const matchYear = studentManageYear === 'ALL' || !r.academicYear || r.academicYear === studentManageYear;
+      const matchSem = studentManageSemester === 'ALL' || !r.semester || r.semester === studentManageSemester;
+      const matchGrade = studentManageGrade === 'ALL' || normalizeGradeLevel(r.gradeLevel) === normalizeGradeLevel(studentManageGrade);
+      const matchRoom = studentManageRoom === 'ALL' || normalizeRoom(r.room) === normalizeRoom(studentManageRoom);
+      const matchSearch = matchesStudentSearch(studentManageSearch, r.studentName, r.studentNumber);
       return matchYear && matchSem && matchGrade && matchRoom && matchSearch;
     }).sort((a, b) => {
       if (a.gradeLevel !== b.gradeLevel) return a.gradeLevel.localeCompare(b.gradeLevel);
@@ -2889,6 +3167,31 @@ export default function TeacherPortalView({
   // -------------------------------------------------------------
   // DASHBOARD ANALYTICS COMPUTATIONS & HANDLERS (วิเคราะห์ผลรายวิชา / รายห้อง)
   // -------------------------------------------------------------
+  const normalizeExternalUrl = React.useCallback((url?: string): string => {
+    const trimmed = (url || '').trim();
+    if (!trimmed) return '';
+    return /^https?:\/\//i.test(trimmed) ? trimmed : `https://${trimmed}`;
+  }, []);
+
+  const findAssignmentSampleUrl = React.useCallback((assignmentId?: string, assignmentTitle?: string, subjectCode?: string): string => {
+    const idNorm = (assignmentId || '').trim().toLowerCase();
+    const titleNorm = (assignmentTitle || '').trim().toLowerCase();
+    const codeNorm = (subjectCode || '').trim().toLowerCase();
+    const match = assignments.find(a => {
+      if (idNorm && a.id && a.id.trim().toLowerCase() === idNorm) return true;
+      const aTitle = (a.title || '').trim().toLowerCase();
+      if (!titleNorm || !aTitle || aTitle !== titleNorm) return false;
+      if (codeNorm && a.subjectCode) return a.subjectCode.trim().toLowerCase() === codeNorm;
+      return true;
+    });
+    return normalizeExternalUrl(match?.sampleUrl);
+  }, [assignments, normalizeExternalUrl]);
+
+  const activeDashAssignmentObj = useMemo(() => {
+    if (dashAssignment === 'ALL') return null;
+    return assignments.find(a => a.id === dashAssignment || a.title === dashAssignment) || null;
+  }, [dashAssignment, assignments]);
+
   // Unique list of subjects for Dashboard filters (เฉพาะวิชาของครูท่านนี้ที่นำข้อมูลเข้า หรือมีนักเรียนส่งงาน)
   const availableDashSubjects = useMemo(() => {
     return teacherSubjects.map(([code, name]) => ({ code, name }));
@@ -2930,13 +3233,13 @@ export default function TeacherPortalView({
         const matchAssignment = dashAssignment === 'ALL' || s.assignmentId === dashAssignment || s.assignmentName === dashAssignment;
         const effectiveStatus = s.status || (s.score !== null && s.score !== undefined ? 'ตรวจแล้ว' : 'รอตรวจ');
         const matchStatus = dashStatus === 'ALL' || effectiveStatus === dashStatus;
-        const q = dashSearch.trim().toLowerCase();
-        const matchQuery = !q || (
-          s.studentName.toLowerCase().includes(q) ||
-          s.studentNumber.toLowerCase().includes(q) ||
-          s.assignmentName.toLowerCase().includes(q) ||
-          (s.subjectCode && s.subjectCode.toLowerCase().includes(q)) ||
-          (s.subjectName && s.subjectName.toLowerCase().includes(q))
+        const matchQuery = matchesStudentSearch(
+          dashSearch,
+          s.studentName,
+          s.studentNumber,
+          s.assignmentName,
+          s.subjectCode,
+          s.subjectName
         );
         return matchTeacher && matchYear && matchSemester && matchSubject && matchGrade && matchRoom && matchAssignment && matchStatus && matchQuery;
       })
@@ -3124,20 +3427,25 @@ export default function TeacherPortalView({
 
   // Assignment breakdown under current filters
   const dashAssignmentBreakdown = useMemo(() => {
-    const map = new Map<string, { title: string; maxScore: number; subjectCode: string; total: number; graded: number; totalScore: number }>();
+    const map = new Map<string, { title: string; maxScore: number; subjectCode: string; sampleUrl: string; total: number; graded: number; totalScore: number }>();
     dashFilteredSubmissions.forEach(s => {
       const key = s.assignmentId || s.assignmentName;
       if (!map.has(key)) {
+        const resolvedSampleUrl = normalizeExternalUrl(s.sampleUrl) || findAssignmentSampleUrl(s.assignmentId, s.assignmentName, s.subjectCode);
         map.set(key, {
           title: s.assignmentName,
           maxScore: s.maxScore || 10,
           subjectCode: s.subjectCode || '',
+          sampleUrl: resolvedSampleUrl,
           total: 0,
           graded: 0,
           totalScore: 0,
         });
       }
       const item = map.get(key)!;
+      if (!item.sampleUrl && s.sampleUrl) {
+        item.sampleUrl = normalizeExternalUrl(s.sampleUrl);
+      }
       item.total++;
       if (s.status === 'ตรวจแล้ว' && s.score !== null && s.score !== undefined) {
         item.graded++;
@@ -3149,12 +3457,13 @@ export default function TeacherPortalView({
       title: item.title,
       maxScore: item.maxScore,
       subjectCode: item.subjectCode,
+      sampleUrl: item.sampleUrl,
       total: item.total,
       graded: item.graded,
       avgScore: item.graded > 0 ? (item.totalScore / item.graded).toFixed(1) : '-',
       rate: item.total > 0 ? Math.round((item.graded / item.total) * 100) : 0,
     }));
-  }, [dashFilteredSubmissions]);
+  }, [dashFilteredSubmissions, normalizeExternalUrl, findAssignmentSampleUrl]);
 
   // Export Dashboard to Excel
   const handleDashExportExcel = () => {
@@ -3232,6 +3541,11 @@ export default function TeacherPortalView({
   const renderDashboardStudentTable = () => {
     const isDashRoomMode = dashRoom !== 'ALL' && dashUnifiedItems.length > 0;
     const dashTotalCount = isDashRoomMode ? dashUnifiedItems.length : dashFilteredSubmissions.length;
+    const selectedAssignmentUrl =
+      normalizeExternalUrl(activeDashAssignmentObj?.sampleUrl) ||
+      (dashAssignment !== 'ALL'
+        ? normalizeExternalUrl(dashFilteredSubmissions.find(s => s.sampleUrl)?.sampleUrl)
+        : '');
 
     return (
       <div ref={dashResultsRef} className="bg-white/95 backdrop-blur-md rounded-3xl p-6 shadow-xl shadow-purple-100/30 border border-purple-100/70 space-y-4">
@@ -3250,12 +3564,24 @@ export default function TeacherPortalView({
               <p className="text-[11px] text-gray-500">
                 {isDashRoomMode
                   ? `แสดงรายชื่อนักเรียนห้อง ${dashGrade !== 'ALL' ? dashGrade : ''}/${dashRoom} ครบทุกคน (ส่งแล้ว ${dashUnifiedItems.filter(i => i.isSubmitted).length} คน • ค้างส่ง ${dashUnifiedItems.filter(i => !i.isSubmitted).length} คน)`
-                  : 'แสดงรายละเอียดผลงาน คะแนนครู คะแนน AI และสามารถดูคำแนะนำหรือลบผลงานที่ซ้ำได้'}
+                  : 'แสดงรายละเอียดผลงาน ลิงก์ใบงานที่เปิดดูได้ คะแนนครู คะแนน AI และสามารถแก้ไขหรือลบผลงานได้'}
               </p>
             </div>
           </div>
 
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
+            {selectedAssignmentUrl && (
+              <a
+                href={selectedAssignmentUrl}
+                target="_blank"
+                rel="noreferrer"
+                className="px-3 py-1.5 text-xs font-bold text-indigo-700 hover:text-white bg-indigo-50 hover:bg-indigo-600 border border-indigo-200 rounded-lg transition-colors flex items-center gap-1.5 cursor-pointer"
+                title="เปิดดูลิงก์ใบงานที่เลือกกรอง"
+              >
+                <ExternalLink size={13} />
+                <span>📄 เปิดดูใบงาน{activeDashAssignmentObj?.title ? `: ${activeDashAssignmentObj.title}` : ''}</span>
+              </a>
+            )}
             <button
               type="button"
               onClick={handleDashExportExcel}
@@ -3314,6 +3640,7 @@ export default function TeacherPortalView({
                   <th className="py-3 px-3">ชื่อ - นามสกุล นักเรียน</th>
                   <th className="py-3 px-3 text-center">ชั้น/ห้อง</th>
                   <th className="py-3 px-3">รายวิชา & ใบงาน</th>
+                  <th className="py-3 px-3 text-center whitespace-nowrap">🔗 ลิงก์ใบงาน / ผลงาน</th>
                   <th className="py-3 px-3 text-center">คะแนน AI</th>
                   <th className="py-3 px-3 text-center">คะแนนครู</th>
                   <th className="py-3 px-3 text-center">สถานะ</th>
@@ -3327,6 +3654,8 @@ export default function TeacherPortalView({
                       const sub = item.submission;
                       const isGraded = sub.status === 'ตรวจแล้ว' && sub.score !== null && sub.score !== undefined;
                       const hasAi = sub.aiEvaluation && sub.aiEvaluation.suggestedScore !== undefined;
+                      const workHref = normalizeExternalUrl(sub.workUrl);
+                      const sampleHref = normalizeExternalUrl(sub.sampleUrl) || findAssignmentSampleUrl(sub.assignmentId, sub.assignmentName, sub.subjectCode);
 
                       return (
                         <tr key={item.key} className="hover:bg-purple-50/40 transition-colors">
@@ -3344,18 +3673,36 @@ export default function TeacherPortalView({
                           </td>
                           <td className="py-3 px-3">
                             <p className="font-semibold text-gray-800 line-clamp-1">{sub.assignmentName}</p>
-                            <div className="flex items-center gap-1.5 mt-0.5">
-                              <span className="text-[10px] text-indigo-600 font-medium">{sub.subjectCode}</span>
-                              {sub.workUrl && (
+                            <span className="text-[10px] text-indigo-600 font-medium">{sub.subjectCode} {sub.subjectName}</span>
+                          </td>
+                          <td className="py-3 px-3 text-center">
+                            <div className="flex flex-wrap items-center justify-center gap-1.5">
+                              {workHref && (
                                 <a
-                                  href={sub.workUrl}
+                                  href={workHref}
                                   target="_blank"
                                   rel="noreferrer"
-                                  className="text-[10px] text-blue-600 hover:underline flex items-center gap-0.5"
+                                  className="px-2.5 py-1 rounded-lg text-[11px] font-bold text-blue-700 hover:text-white bg-blue-50 hover:bg-blue-600 border border-blue-200 transition-colors inline-flex items-center gap-1 whitespace-nowrap"
+                                  title="เปิดดูงานที่นักเรียนส่ง"
                                 >
-                                  <span>เปิดผลงาน</span>
-                                  <ExternalLink size={10} />
+                                  <ExternalLink size={11} />
+                                  <span>เปิดดูผลงาน</span>
                                 </a>
+                              )}
+                              {sampleHref && (
+                                <a
+                                  href={sampleHref}
+                                  target="_blank"
+                                  rel="noreferrer"
+                                  className="px-2.5 py-1 rounded-lg text-[11px] font-bold text-violet-700 hover:text-white bg-violet-50 hover:bg-violet-600 border border-violet-200 transition-colors inline-flex items-center gap-1 whitespace-nowrap"
+                                  title="เปิดดูลิงก์ใบงาน"
+                                >
+                                  <ExternalLink size={11} />
+                                  <span>ดูใบงานครู</span>
+                                </a>
+                              )}
+                              {!workHref && !sampleHref && (
+                                <span className="text-gray-400 text-[11px]">-</span>
                               )}
                             </div>
                           </td>
@@ -3406,18 +3753,20 @@ export default function TeacherPortalView({
                               <button
                                 type="button"
                                 onClick={() => handleOpenEditStudent(sub)}
-                                className="p-1.5 text-gray-600 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition-colors cursor-pointer"
-                                title="แก้ไขข้อมูลนักเรียน"
+                                className="px-2 py-1 text-[11px] font-bold text-indigo-700 bg-indigo-50 hover:bg-indigo-100 border border-indigo-200 rounded-lg transition-colors cursor-pointer inline-flex items-center gap-1"
+                                title="แก้ไขข้อมูลนักเรียนหรือลิงก์งานที่ส่ง"
                               >
-                                <Edit3 size={13} />
+                                <Edit3 size={11} />
+                                <span>แก้ไข</span>
                               </button>
                               <button
                                 type="button"
                                 onClick={() => handleDeleteStudentSubmission(sub)}
-                                className="p-1.5 text-gray-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-colors cursor-pointer"
-                                title="ลบผลงานนี้ (กรณีส่งซ้ำ)"
+                                className="px-2 py-1 text-[11px] font-bold text-rose-600 bg-rose-50 hover:bg-rose-600 hover:text-white border border-rose-200 rounded-lg transition-colors cursor-pointer inline-flex items-center gap-1"
+                                title="ลบผลงานนี้"
                               >
-                                <Trash2 size={13} />
+                                <Trash2 size={11} />
+                                <span>ลบ</span>
                               </button>
                             </div>
                           </td>
@@ -3425,6 +3774,10 @@ export default function TeacherPortalView({
                       );
                     } else {
                       /* คนค้างส่ง */
+                      const missingSampleHref =
+                        selectedAssignmentUrl ||
+                        (dashSubject !== 'ALL' ? normalizeExternalUrl(availableDashAssignments.find(a => a.sampleUrl)?.sampleUrl) : '');
+
                       return (
                         <tr key={item.key} className="bg-amber-50/20 hover:bg-amber-50/40 transition-colors">
                           <td className="py-3 px-3 text-center font-bold text-gray-500">
@@ -3440,7 +3793,25 @@ export default function TeacherPortalView({
                             </span>
                           </td>
                           <td className="py-3 px-3">
-                            <span className="text-gray-400 italic text-xs">ยังไม่ส่งงาน</span>
+                            <span className="text-gray-400 italic text-xs">
+                              {activeDashAssignmentObj ? activeDashAssignmentObj.title : 'ยังไม่ส่งงาน'}
+                            </span>
+                          </td>
+                          <td className="py-3 px-3 text-center">
+                            {missingSampleHref ? (
+                              <a
+                                href={missingSampleHref}
+                                target="_blank"
+                                rel="noreferrer"
+                                className="px-2.5 py-1 rounded-lg text-[11px] font-bold text-violet-700 hover:text-white bg-violet-50 hover:bg-violet-600 border border-violet-200 transition-colors inline-flex items-center gap-1 whitespace-nowrap"
+                                title="เปิดดูลิงก์ใบงาน"
+                              >
+                                <ExternalLink size={11} />
+                                <span>ดูใบงานครู</span>
+                              </a>
+                            ) : (
+                              <span className="text-gray-400 text-[11px]">-</span>
+                            )}
                           </td>
                           <td className="py-3 px-3 text-center text-gray-400 italic">-</td>
                           <td className="py-3 px-3 text-center text-gray-400 italic">-</td>
@@ -3472,6 +3843,8 @@ export default function TeacherPortalView({
                   dashFilteredSubmissions.map((sub) => {
                     const isGraded = sub.status === 'ตรวจแล้ว' && sub.score !== null && sub.score !== undefined;
                     const hasAi = sub.aiEvaluation && sub.aiEvaluation.suggestedScore !== undefined;
+                    const workHref = normalizeExternalUrl(sub.workUrl);
+                    const sampleHref = normalizeExternalUrl(sub.sampleUrl) || findAssignmentSampleUrl(sub.assignmentId, sub.assignmentName, sub.subjectCode);
 
                     return (
                       <tr key={sub.id} className="hover:bg-purple-50/40 transition-colors">
@@ -3489,18 +3862,36 @@ export default function TeacherPortalView({
                         </td>
                         <td className="py-3 px-3">
                           <p className="font-semibold text-gray-800 line-clamp-1">{sub.assignmentName}</p>
-                          <div className="flex items-center gap-1.5 mt-0.5">
-                            <span className="text-[10px] text-indigo-600 font-medium">{sub.subjectCode}</span>
-                            {sub.workUrl && (
+                          <span className="text-[10px] text-indigo-600 font-medium">{sub.subjectCode} {sub.subjectName}</span>
+                        </td>
+                        <td className="py-3 px-3 text-center">
+                          <div className="flex flex-wrap items-center justify-center gap-1.5">
+                            {workHref && (
                               <a
-                                href={sub.workUrl}
+                                href={workHref}
                                 target="_blank"
                                 rel="noreferrer"
-                                className="text-[10px] text-blue-600 hover:underline flex items-center gap-0.5"
+                                className="px-2.5 py-1 rounded-lg text-[11px] font-bold text-blue-700 hover:text-white bg-blue-50 hover:bg-blue-600 border border-blue-200 transition-colors inline-flex items-center gap-1 whitespace-nowrap"
+                                title="เปิดดูงานที่นักเรียนส่ง"
                               >
-                                <span>เปิดผลงาน</span>
-                                <ExternalLink size={10} />
+                                <ExternalLink size={11} />
+                                <span>เปิดดูผลงาน</span>
                               </a>
+                            )}
+                            {sampleHref && (
+                              <a
+                                href={sampleHref}
+                                target="_blank"
+                                rel="noreferrer"
+                                className="px-2.5 py-1 rounded-lg text-[11px] font-bold text-violet-700 hover:text-white bg-violet-50 hover:bg-violet-600 border border-violet-200 transition-colors inline-flex items-center gap-1 whitespace-nowrap"
+                                title="เปิดดูลิงก์ใบงาน"
+                              >
+                                <ExternalLink size={11} />
+                                <span>ดูใบงานครู</span>
+                              </a>
+                            )}
+                            {!workHref && !sampleHref && (
+                              <span className="text-gray-400 text-[11px]">-</span>
                             )}
                           </div>
                         </td>
@@ -3551,18 +3942,20 @@ export default function TeacherPortalView({
                             <button
                               type="button"
                               onClick={() => handleOpenEditStudent(sub)}
-                              className="p-1.5 text-gray-600 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition-colors cursor-pointer"
-                              title="แก้ไขข้อมูลนักเรียน"
+                              className="px-2 py-1 text-[11px] font-bold text-indigo-700 bg-indigo-50 hover:bg-indigo-100 border border-indigo-200 rounded-lg transition-colors cursor-pointer inline-flex items-center gap-1"
+                              title="แก้ไขข้อมูลนักเรียนหรือลิงก์งานที่ส่ง"
                             >
-                              <Edit3 size={13} />
+                              <Edit3 size={11} />
+                              <span>แก้ไข</span>
                             </button>
                             <button
                               type="button"
                               onClick={() => handleDeleteStudentSubmission(sub)}
-                              className="p-1.5 text-gray-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-colors cursor-pointer"
-                              title="ลบผลงานนี้ (กรณีส่งซ้ำ)"
+                              className="px-2 py-1 text-[11px] font-bold text-rose-600 bg-rose-50 hover:bg-rose-600 hover:text-white border border-rose-200 rounded-lg transition-colors cursor-pointer inline-flex items-center gap-1"
+                              title="ลบผลงานนี้"
                             >
-                              <Trash2 size={13} />
+                              <Trash2 size={11} />
+                              <span>ลบ</span>
                             </button>
                           </div>
                         </td>
@@ -3644,22 +4037,24 @@ export default function TeacherPortalView({
                               </span>
                             </div>
                           </div>
-                          <div className="flex items-center gap-1">
+                          <div className="flex items-center gap-1 shrink-0">
                             <button
                               type="button"
                               onClick={() => handleOpenEditStudent(sub)}
-                              className="p-1 text-gray-400 hover:text-violet-700 hover:bg-violet-50 rounded-md transition-colors cursor-pointer"
-                              title="แก้ไขชื่อ-สกุล"
+                              className="px-2 py-1 text-[10px] font-bold text-violet-700 bg-violet-50 hover:bg-violet-100 border border-violet-200 rounded-lg transition-colors cursor-pointer inline-flex items-center gap-1"
+                              title="แก้ไขข้อมูลนักเรียน หรืองานที่ส่ง"
                             >
-                              <Edit3 size={12} />
+                              <Edit3 size={11} />
+                              <span>แก้ไข</span>
                             </button>
                             <button
                               type="button"
                               onClick={() => handleDeleteStudentSubmission(sub)}
-                              className="p-1 text-gray-400 hover:text-rose-600 hover:bg-rose-50 rounded-md transition-colors cursor-pointer"
-                              title="ลบผลงานนี้"
+                              className="px-2 py-1 text-[10px] font-bold text-rose-600 bg-rose-50 hover:bg-rose-600 hover:text-white border border-rose-200 rounded-lg transition-colors cursor-pointer inline-flex items-center gap-1"
+                              title="ลบงานที่ส่งนี้ออกจากระบบและ Google Sheet"
                             >
-                              <Trash2 size={12} />
+                              <Trash2 size={11} />
+                              <span>ลบ</span>
                             </button>
                           </div>
                         </div>
@@ -3915,22 +4310,24 @@ export default function TeacherPortalView({
                             </span>
                           </div>
                         </div>
-                        <div className="flex items-center gap-1">
+                        <div className="flex items-center gap-1 shrink-0">
                           <button
                             type="button"
                             onClick={() => handleOpenEditStudent(sub)}
-                            className="p-1 text-gray-400 hover:text-violet-700 hover:bg-violet-50 rounded-md transition-colors cursor-pointer"
-                            title="แก้ไขชื่อ-สกุล"
+                            className="px-2 py-1 text-[10px] font-bold text-violet-700 bg-violet-50 hover:bg-violet-100 border border-violet-200 rounded-lg transition-colors cursor-pointer inline-flex items-center gap-1"
+                            title="แก้ไขข้อมูลนักเรียน หรืองานที่ส่ง"
                           >
-                            <Edit3 size={12} />
+                            <Edit3 size={11} />
+                            <span>แก้ไข</span>
                           </button>
                           <button
                             type="button"
                             onClick={() => handleDeleteStudentSubmission(sub)}
-                            className="p-1 text-gray-400 hover:text-rose-600 hover:bg-rose-50 rounded-md transition-colors cursor-pointer"
-                            title="ลบผลงานนี้"
+                            className="px-2 py-1 text-[10px] font-bold text-rose-600 bg-rose-50 hover:bg-rose-600 hover:text-white border border-rose-200 rounded-lg transition-colors cursor-pointer inline-flex items-center gap-1"
+                            title="ลบงานที่ส่งนี้ออกจากระบบและ Google Sheet"
                           >
-                            <Trash2 size={12} />
+                            <Trash2 size={11} />
+                            <span>ลบ</span>
                           </button>
                         </div>
                       </div>
@@ -5174,13 +5571,27 @@ export default function TeacherPortalView({
                             </span>
                           </td>
                           <td className="py-2.5 px-2 text-right">
-                            <button
-                              type="button"
-                              onClick={() => setDashAssignment(ab.title)}
-                              className="px-2.5 py-1 text-[11px] font-bold text-indigo-700 hover:text-white bg-indigo-50 hover:bg-indigo-600 rounded-lg transition-all border border-indigo-200 cursor-pointer"
-                            >
-                              กรองใบงานนี้
-                            </button>
+                            <div className="inline-flex items-center justify-end gap-1.5">
+                              {ab.sampleUrl && (
+                                <a
+                                  href={ab.sampleUrl}
+                                  target="_blank"
+                                  rel="noreferrer"
+                                  className="px-2.5 py-1 text-[11px] font-bold text-violet-700 hover:text-white bg-violet-50 hover:bg-violet-600 rounded-lg transition-all border border-violet-200 inline-flex items-center gap-1"
+                                  title="เปิดดูลิงก์ใบงาน"
+                                >
+                                  <ExternalLink size={11} />
+                                  <span>เปิดใบงาน</span>
+                                </a>
+                              )}
+                              <button
+                                type="button"
+                                onClick={() => setDashAssignment(ab.title)}
+                                className="px-2.5 py-1 text-[11px] font-bold text-indigo-700 hover:text-white bg-indigo-50 hover:bg-indigo-600 rounded-lg transition-all border border-indigo-200 cursor-pointer"
+                              >
+                                กรองใบงานนี้
+                              </button>
+                            </div>
                           </td>
                         </tr>
                       ))}
@@ -5686,12 +6097,21 @@ export default function TeacherPortalView({
                   onKeyDown={(e) => {
                     if (e.key === 'Enter') handleSearchSubmit();
                   }}
-                  placeholder="🔍 ค้นหาชื่อนักเรียน, เลขที่, รหัสวิชา หรือชื่องาน... (กด Enter เพื่อค้นหา)"
-                  className="w-full pl-10 pr-4 py-2.5 bg-purple-50/30 border border-purple-200/90 rounded-2xl text-xs text-gray-800 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-purple-400 shadow-inner shadow-purple-50"
+                  placeholder="🔍 ค้นหาชื่อนักเรียน, เลขที่, รหัสวิชา หรือชื่องาน เพื่อตรวจ / แก้ไข / ลบงานที่ส่ง..."
+                  className="w-full pl-10 pr-16 py-2.5 bg-purple-50/30 border border-purple-200/90 rounded-2xl text-xs text-gray-800 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-purple-400 shadow-inner shadow-purple-50"
                 />
+                {gradingSearch && (
+                  <button
+                    type="button"
+                    onClick={() => setGradingSearch('')}
+                    className="absolute right-2.5 top-1/2 -translate-y-1/2 px-2 py-1 rounded-lg bg-gray-200 hover:bg-gray-300 text-gray-600 text-[10px] font-bold cursor-pointer"
+                  >
+                    ล้าง ✕
+                  </button>
+                )}
               </div>
 
-              {/* 🔍 ปุ่มค้นหา (Search Button) ตามที่ผู้ใช้ต้องการ */}
+              {/* 🔍 ปุ่มค้นหา */}
               <button
                 type="button"
                 onClick={handleSearchSubmit}
@@ -5701,6 +6121,20 @@ export default function TeacherPortalView({
                 <Search size={15} />
                 <span>🔍 ค้นหารายการ</span>
               </button>
+
+              {(gradingSearch.trim() !== '' && (filterYear !== 'ALL' || filterSemester !== 'ALL')) && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setFilterYear('ALL');
+                    setFilterSemester('ALL');
+                  }}
+                  className="px-3.5 py-2.5 bg-amber-50 hover:bg-amber-100 text-amber-900 border border-amber-300 rounded-2xl text-xs font-bold transition-all flex items-center justify-center gap-1.5 cursor-pointer whitespace-nowrap"
+                  title="ค้นหาชื่อนักเรียนคนนี้จากทุกปีการศึกษาและทุกเทอม"
+                >
+                  <span>🌐 ค้นหาทุกปี/เทอม</span>
+                </button>
+              )}
 
               {/* ปุ่มล้างตัวกรอง */}
               <button
@@ -5780,6 +6214,117 @@ export default function TeacherPortalView({
                     <span>📋 คัดลอกคนค้างส่ง ({gradingRoomStats.missingCount})</span>
                   </button>
                 )}
+              </div>
+            </div>
+
+            {/* แถบใช้คะแนนครูประเมินทุกคน + ช่องครูให้คะแนน */}
+            <div className="px-5 py-4 bg-gradient-to-r from-emerald-50/90 via-teal-50/80 to-indigo-50/70 border-b border-emerald-200/80">
+              <div className="flex flex-col xl:flex-row xl:items-center justify-between gap-3">
+                <div className="flex items-start sm:items-center gap-2.5">
+                  <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-emerald-600 to-teal-600 text-white flex items-center justify-center shadow-sm shrink-0">
+                    <CheckSquare size={18} />
+                  </div>
+                  <div>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <h4 className="text-xs sm:text-sm font-extrabold text-emerald-950">
+                        👨‍🏫 ใช้คะแนนครูประเมินทุกคน
+                      </h4>
+                      <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800 border border-emerald-300">
+                        เป้าหมาย: {batchTeacherTargets.length} คน
+                      </span>
+                    </div>
+                    <p className="text-[11px] text-emerald-900/75">
+                      กรอกคะแนนในช่องครูให้คะแนนเพื่อตรวจและให้คะแนนนักเรียนทุกคนในรายการที่กรองอยู่พร้อมกัน
+                    </p>
+                  </div>
+                </div>
+
+                <div className="flex flex-wrap items-center gap-2">
+                  {/* เลือกกลุ่มเป้าหมาย */}
+                  <select
+                    value={batchTeacherScope}
+                    onChange={(e) => setBatchTeacherScope(e.target.value as 'all' | 'pending')}
+                    className="px-2.5 py-2 bg-white border border-emerald-200 rounded-xl text-xs font-bold text-emerald-950 focus:outline-none focus:ring-2 focus:ring-emerald-400 cursor-pointer"
+                    title="เลือกกลุ่มนักเรียนที่จะใช้คะแนนครูประเมิน"
+                  >
+                    <option value="all">👥 ทุกคนที่ส่ง ({teacherSubmissions.length} คน)</option>
+                    <option value="pending">⏳ เฉพาะรอตรวจ ({teacherPendingSubmissions.length} คน)</option>
+                  </select>
+
+                  {/* ช่องครูให้คะแนน */}
+                  <div className="flex items-center gap-1.5 bg-white border border-emerald-300 rounded-xl px-2.5 py-1 shadow-2xs">
+                    <span className="text-[11px] font-bold text-emerald-800 whitespace-nowrap">ช่องครูให้คะแนน:</span>
+                    <input
+                      type="number"
+                      step="0.5"
+                      min="0"
+                      max={batchReferenceMaxScore}
+                      value={batchTeacherScore}
+                      onChange={(e) => setBatchTeacherScore(e.target.value)}
+                      placeholder="ระบุคะแนน"
+                      className="w-20 px-2 py-1 bg-emerald-50/50 border border-emerald-200 rounded-lg text-xs font-extrabold text-emerald-950 text-center focus:outline-none focus:ring-2 focus:ring-emerald-400"
+                    />
+                    <span className="text-[11px] font-semibold text-gray-500 whitespace-nowrap">/ {batchReferenceMaxScore}</span>
+                    <button
+                      type="button"
+                      onClick={() => setBatchTeacherScore(String(batchReferenceMaxScore))}
+                      className="px-2 py-0.5 bg-emerald-100 hover:bg-emerald-200 text-emerald-800 rounded-md text-[10px] font-bold transition-colors cursor-pointer whitespace-nowrap"
+                      title="ใส่คะแนนเต็ม"
+                    >
+                      เต็ม {batchReferenceMaxScore}
+                    </button>
+                  </div>
+
+                  {/* ข้อเสนอแนะครู (ไม่บังคับ) */}
+                  <input
+                    type="text"
+                    value={batchTeacherFeedback}
+                    onChange={(e) => setBatchTeacherFeedback(e.target.value)}
+                    placeholder="ข้อเสนอแนะครูสำหรับทุกคน (ไม่บังคับ)..."
+                    className="w-full sm:w-48 px-3 py-2 bg-white border border-emerald-200 rounded-xl text-xs text-gray-800 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-emerald-400"
+                  />
+
+                  {/* ปุ่มใส่คะแนนครูลงช่องทุกคน (เผื่อปรับแก้รายคนก่อน) */}
+                  <button
+                    type="button"
+                    onClick={handleFillTeacherScoresToInputs}
+                    disabled={isBatchTeacherGrading || batchTeacherTargets.length === 0}
+                    className="px-3 py-2 bg-white hover:bg-emerald-100 text-emerald-800 border border-emerald-300 rounded-xl text-xs font-bold transition-all cursor-pointer disabled:opacity-50 whitespace-nowrap"
+                    title="นำคะแนนที่ระบุไปใส่ในช่องคะแนนแต่ละคนเพื่อแก้ไขเพิ่มเติมก่อนบันทึก"
+                  >
+                    📝 ใส่ช่องทุกคน
+                  </button>
+
+                  {/* ปุ่มใช้คะแนนครูประเมินทุกคนและบันทึกทันที */}
+                  <button
+                    type="button"
+                    onClick={handleBatchTeacherGradeAll}
+                    disabled={isBatchTeacherGrading || batchTeacherTargets.length === 0}
+                    className="px-4 py-2 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 text-white rounded-xl text-xs font-extrabold shadow-md shadow-emerald-200 transition-all flex items-center gap-1.5 cursor-pointer disabled:opacity-50 hover:scale-[1.02] active:scale-[0.98] whitespace-nowrap"
+                    title="ใช้คะแนนครูที่กรอกประเมินและบันทึกคะแนนให้นักเรียนทุกคนทันที"
+                  >
+                    <CheckCircle size={14} />
+                    <span>
+                      {isBatchTeacherGrading
+                        ? 'กำลังบันทึกคะแนนทุกคน...'
+                        : `✅ ใช้คะแนนครูประเมินทุกคน (${batchTeacherTargets.length} คน)`}
+                    </span>
+                  </button>
+
+                  {/* ปุ่มบันทึกคะแนนทั้งหมดในตารางเมื่อมีการกรอก/ปรับแก้รายช่อง */}
+                  {editedInlineGradingCount > 0 && (
+                    <button
+                      type="button"
+                      onClick={handleSaveAllInlineGradingScores}
+                      disabled={isBatchTeacherGrading}
+                      className="px-3.5 py-2 bg-gradient-to-r from-indigo-600 to-violet-600 hover:from-indigo-700 hover:to-violet-700 text-white rounded-xl text-xs font-bold shadow-xs transition-all flex items-center gap-1.5 cursor-pointer disabled:opacity-50 whitespace-nowrap"
+                      title="บันทึกคะแนนทั้งหมดที่กรอกไว้ในช่องตาราง"
+                    >
+                      <Save size={13} />
+                      <span>💾 บันทึกในตาราง ({editedInlineGradingCount})</span>
+                    </button>
+                  )}
+                </div>
               </div>
             </div>
 
@@ -6989,8 +7534,63 @@ export default function TeacherPortalView({
                 )}
               </div>
 
-              {/* Filter Grid - ไม่ต้องกรองชื่อผู้สอนคนอื่น */}
-              <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
+              {/* แถบค้นหาชื่อนักเรียนหลัก สำหรับค้นหาเพื่อแก้ไขหรือลบงานที่ส่ง */}
+              <div className="p-3.5 bg-gradient-to-r from-rose-50/80 via-purple-50/60 to-indigo-50/70 rounded-2xl border border-rose-200/80 space-y-2">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <label className="text-xs font-bold text-gray-800 flex items-center gap-1.5">
+                    <Search size={14} className="text-rose-600" />
+                    <span>ค้นหาชื่อนักเรียน เลขที่ หรือชื่องาน (เพื่อแก้ไข / ลบงานที่ส่ง)</span>
+                  </label>
+                  {studentManageSearch.trim() && studentManageViewMode === 'roster' && (
+                    <button
+                      type="button"
+                      onClick={() => setStudentManageViewMode('submissions')}
+                      className="px-2.5 py-1 bg-rose-600 hover:bg-rose-700 text-white rounded-lg text-[11px] font-bold shadow-2xs cursor-pointer flex items-center gap-1 transition-all"
+                    >
+                      <FileText size={11} />
+                      <span>ดูงานที่ส่งที่พบ ({manageStudentSubmissions.length} รายการ) →</span>
+                    </button>
+                  )}
+                </div>
+                <div className="flex flex-col sm:flex-row gap-2">
+                  <div className="relative flex-1">
+                    <Search size={15} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-rose-500" />
+                    <input
+                      type="text"
+                      value={studentManageSearch}
+                      onChange={(e) => setStudentManageSearch(e.target.value)}
+                      placeholder="🔍 พิมพ์ชื่อ-นามสกุลนักเรียน (เช่น สมชาย), เลขที่, รหัสวิชา หรือชื่องานที่ต้องการแก้ไข/ลบ..."
+                      className="w-full pl-10 pr-16 py-2.5 bg-white border border-rose-200 rounded-xl text-xs font-medium text-gray-800 focus:outline-none focus:ring-2 focus:ring-rose-300 shadow-2xs"
+                    />
+                    {studentManageSearch && (
+                      <button
+                        type="button"
+                        onClick={() => setStudentManageSearch('')}
+                        className="absolute right-2.5 top-1/2 -translate-y-1/2 px-2 py-0.5 rounded-lg bg-gray-200 hover:bg-gray-300 text-gray-700 text-[10px] font-bold cursor-pointer"
+                      >
+                        ล้าง ✕
+                      </button>
+                    )}
+                  </div>
+                  {(studentManageYear !== 'ALL' || studentManageSemester !== 'ALL') && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setStudentManageYear('ALL');
+                        setStudentManageSemester('ALL');
+                        setStudentManageViewMode('submissions');
+                      }}
+                      className="px-3.5 py-2 bg-white hover:bg-amber-50 text-amber-900 border border-amber-300 rounded-xl text-xs font-bold transition-colors cursor-pointer whitespace-nowrap"
+                      title="ค้นหาจากทุกปีการศึกษาและทุกเทอม"
+                    >
+                      🌐 ค้นหาทุกปี/ทุกเทอม
+                    </button>
+                  )}
+                </div>
+              </div>
+
+              {/* Filter Grid */}
+              <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
                 {/* ปีการศึกษา */}
                 <div>
                   <label className="block text-[11px] font-semibold text-gray-700 mb-1 flex items-center gap-1">
@@ -7003,9 +7603,9 @@ export default function TeacherPortalView({
                     className="w-full px-2.5 py-2 bg-purple-50/20 border border-purple-200/80 rounded-xl text-xs font-medium text-gray-800 cursor-pointer focus:outline-none focus:ring-2 focus:ring-rose-300"
                   >
                     <option value="ALL">-- ทุกปีการศึกษา --</option>
-                    {availableAcademicYears.map((y) => (
+                    {sheetAcademicYears.map((y) => (
                       <option key={y} value={y}>
-                        ปี {y}
+                        ปี {y}{sheetDataYearSet.has(y) ? ' ✓' : ''}
                       </option>
                     ))}
                   </select>
@@ -7023,9 +7623,9 @@ export default function TeacherPortalView({
                     className="w-full px-2.5 py-2 bg-purple-50/20 border border-purple-200/80 rounded-xl text-xs font-medium text-gray-800 cursor-pointer focus:outline-none focus:ring-2 focus:ring-rose-300"
                   >
                     <option value="ALL">-- ทุกภาคเรียน --</option>
-                    {SEMESTERS.map((s) => (
-                      <option key={s.value} value={s.value}>
-                        {s.label}
+                    {sheetSemesters.map((s) => (
+                      <option key={s} value={s}>
+                        ภาคเรียนที่ {s}
                       </option>
                     ))}
                   </select>
@@ -7092,24 +7692,6 @@ export default function TeacherPortalView({
                       </option>
                     ))}
                   </select>
-                </div>
-
-                {/* ค้นหาชื่อ / เลขที่ */}
-                <div>
-                  <label className="block text-[11px] font-semibold text-gray-700 mb-1 flex items-center gap-1">
-                    <span>🔍</span>
-                    <span>ค้นหาชื่อ/เลขที่</span>
-                  </label>
-                  <div className="relative">
-                    <input
-                      type="text"
-                      value={studentManageSearch}
-                      onChange={(e) => setStudentManageSearch(e.target.value)}
-                      placeholder="ชื่อ, เลขที่ หรือวิชา..."
-                      className="w-full pl-7 pr-3 py-2 bg-purple-50/20 border border-purple-200/80 rounded-xl text-xs text-gray-800 focus:outline-none focus:ring-2 focus:ring-rose-300"
-                    />
-                    <Search size={13} className="absolute left-2 top-1/2 -translate-y-1/2 text-gray-400" />
-                  </div>
                 </div>
               </div>
 
@@ -8820,18 +9402,20 @@ export default function TeacherPortalView({
         </div>
       )}
 
-      {/* MODAL: แก้ไขข้อมูลนักเรียน (EDIT STUDENT INFO) */}
+      {/* MODAL: แก้ไขข้อมูลนักเรียนและงานที่ส่ง (EDIT STUDENT SUBMISSION INFO) */}
       {editingStudentSub && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-fade-in">
-          <div className="bg-white rounded-3xl max-w-md w-full p-6 shadow-2xl border border-purple-100 space-y-5">
+          <div className="bg-white rounded-3xl max-w-lg w-full p-6 shadow-2xl border border-purple-100 space-y-5 max-h-[92vh] overflow-y-auto">
             <div className="flex items-center justify-between border-b border-purple-100 pb-3">
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-2.5">
                 <div className="w-10 h-10 rounded-xl bg-violet-100 text-violet-700 flex items-center justify-center text-lg font-bold">
                   ✏️
                 </div>
                 <div>
-                  <h3 className="text-base font-bold text-gray-900">แก้ไขข้อมูลนักเรียน</h3>
-                  <p className="text-xs text-gray-500 truncate max-w-xs">งาน: {editingStudentSub.assignmentName}</p>
+                  <h3 className="text-base font-bold text-gray-900">แก้ไขข้อมูลนักเรียน & งานที่ส่ง</h3>
+                  <p className="text-xs text-gray-500 truncate max-w-xs">
+                    {editingStudentSub.subjectCode ? `${editingStudentSub.subjectCode} • ` : ''}{editingStudentSub.assignmentName}
+                  </p>
                 </div>
               </div>
               <button
@@ -8902,6 +9486,57 @@ export default function TeacherPortalView({
                     ))}
                   </select>
                 </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-2.5">
+                <div>
+                  <label className="block text-xs font-semibold text-gray-700 mb-1">ปีการศึกษา</label>
+                  <input
+                    type="text"
+                    list="edit-sub-years-list"
+                    value={editingStudentSub.academicYear}
+                    onChange={(e) => setEditingStudentSub(prev => prev ? { ...prev, academicYear: e.target.value } : null)}
+                    placeholder="เช่น 2569"
+                    className="w-full px-3 py-2 bg-purple-50/20 border border-purple-200 rounded-xl text-xs font-semibold focus:outline-none focus:ring-2 focus:ring-purple-300"
+                  />
+                  <datalist id="edit-sub-years-list">
+                    {sheetAcademicYears.map(y => (
+                      <option key={y} value={y}>{y}</option>
+                    ))}
+                  </datalist>
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-gray-700 mb-1">ภาคเรียน</label>
+                  <select
+                    value={editingStudentSub.semester}
+                    onChange={(e) => setEditingStudentSub(prev => prev ? { ...prev, semester: e.target.value } : null)}
+                    className="w-full px-2.5 py-2 bg-purple-50/20 border border-purple-200 rounded-xl text-xs font-semibold cursor-pointer focus:outline-none focus:ring-2 focus:ring-purple-300"
+                  >
+                    {sheetSemesters.map(s => (
+                      <option key={s} value={s}>ภาคเรียนที่ {s}</option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-gray-700 mb-1">
+                  ชื่องาน / ใบงานที่ส่ง <span className="text-rose-500">*</span>
+                </label>
+                <input
+                  type="text"
+                  required
+                  list="edit-sub-assignments-list"
+                  value={editingStudentSub.assignmentName}
+                  onChange={(e) => setEditingStudentSub(prev => prev ? { ...prev, assignmentName: e.target.value } : null)}
+                  placeholder="ระบุชื่องานหรือใบงาน..."
+                  className="w-full px-3 py-2 bg-purple-50/20 border border-purple-200 rounded-xl text-xs text-gray-800 focus:outline-none focus:ring-2 focus:ring-purple-300"
+                />
+                <datalist id="edit-sub-assignments-list">
+                  {assignments.map(a => (
+                    <option key={a.id} value={a.title}>{a.subjectCode ? `${a.subjectCode} - ${a.title}` : a.title}</option>
+                  ))}
+                </datalist>
               </div>
 
               <div>

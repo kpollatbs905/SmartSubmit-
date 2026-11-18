@@ -465,6 +465,37 @@ function doPost(e) {
       return responseJSON({ status: 'success', message: 'ลบข้อมูลสำเร็จ ' + deleted + ' รายการ' });
     }
 
+    // 6.2 แก้ไขข้อมูลการส่งงานและลิงก์ผลงานของนักเรียน (ครูผู้สอน)
+    if (action === 'updateSubmissionStudent') {
+      const sheet = ss.getSheetByName(SHEET_NAMES.SUBMISSIONS);
+      const rows = sheet.getDataRange().getValues();
+      const headerMap = getHeaderMap(sheet);
+      const id = body.id ? String(body.id).trim() : '';
+
+      let found = false;
+      for (let i = 1; i < rows.length; i++) {
+        if (String(rows[i][0] || '').trim() === id) {
+          const rowIdx = i + 1;
+          if (body.studentName !== undefined) sheet.getRange(rowIdx, headerMap['ชื่อ-นามสกุล'] || 3).setValue(body.studentName);
+          if (body.studentNumber !== undefined) sheet.getRange(rowIdx, headerMap['เลขที่'] || 4).setValue(body.studentNumber);
+          if (body.gradeLevel !== undefined) sheet.getRange(rowIdx, headerMap['ระดับชั้น'] || 5).setValue(body.gradeLevel);
+          if (body.room !== undefined) sheet.getRange(rowIdx, headerMap['ห้อง'] || 6).setValue(body.room);
+          if (body.subjectCode !== undefined) sheet.getRange(rowIdx, headerMap['รหัสวิชา'] || 8).setValue(body.subjectCode);
+          if (body.subjectName !== undefined) sheet.getRange(rowIdx, headerMap['ชื่อวิชา'] || 9).setValue(body.subjectName);
+          if (body.assignmentName !== undefined) sheet.getRange(rowIdx, headerMap['ชื่องาน'] || 10).setValue(body.assignmentName);
+          if (body.workUrl !== undefined) sheet.getRange(rowIdx, headerMap['ลิงก์ผลงาน'] || 12).setValue(body.workUrl);
+          if (body.academicYear !== undefined && headerMap['ปีการศึกษา']) sheet.getRange(rowIdx, headerMap['ปีการศึกษา']).setValue(body.academicYear);
+          if (body.semester !== undefined && headerMap['ภาคเรียน']) sheet.getRange(rowIdx, headerMap['ภาคเรียน']).setValue(body.semester);
+          found = true;
+          break;
+        }
+      }
+      return responseJSON({
+        status: found ? 'success' : 'not_found',
+        message: found ? 'แก้ไขข้อมูลงานที่ส่งสำเร็จ' : 'ไม่พบข้อมูลที่ต้องการแก้ไขใน Google Sheet'
+      });
+    }
+
     // 7. ลบข้อมูลครูผู้สอน (Admin)
     if (action === 'deleteTeacher') {
       const sheet = ss.getSheetByName(SHEET_NAMES.TEACHERS);

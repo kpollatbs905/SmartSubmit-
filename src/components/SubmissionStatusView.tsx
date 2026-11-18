@@ -80,6 +80,7 @@ export default function SubmissionStatusView({
   // Sub-tab: 'submitted' (งานที่ส่งแล้ว), 'pending' (งานค้างส่ง), 'subjects' (สรุปรายวิชา)
   const [activeSubTab, setActiveSubTab] = useState<'submitted' | 'pending' | 'subjects'>('submitted');
   const [selectedSubject, setSelectedSubject] = useState<string>('ALL');
+  const [selectedAssignment, setSelectedAssignment] = useState<string>('ALL');
   const [showOnlyPendingInSubjects, setShowOnlyPendingInSubjects] = useState<boolean>(false);
 
   // Modal states
@@ -93,6 +94,13 @@ export default function SubmissionStatusView({
   }, [initialSearchTerm]);
 
   const hasSearched = searchTerm.trim().length > 0;
+  const hasActiveFilter =
+    selectedGrade !== 'ALL' ||
+    selectedRoom !== 'ALL' ||
+    selectedSubject !== 'ALL' ||
+    selectedAssignment !== 'ALL' ||
+    selectedStatus !== 'ALL';
+  const shouldShowResults = hasSearched || hasActiveFilter;
 
   // Helper: ตรวจสอบว่างานตรงกับวิชาที่เลือกกรองหรือไม่
   const matchesSubjectFilter = React.useCallback((filterVal: string, code?: string, name?: string) => {
@@ -102,6 +110,24 @@ export default function SubmissionStatusView({
     const normName = (name || '').trim().toLowerCase();
     return (Boolean(normCode) && normCode === normFilter) || (Boolean(normName) && normName === normFilter);
   }, []);
+
+  // Helper: ตรวจสอบว่างานตรงกับใบงานที่เลือกกรองหรือไม่
+  const matchesAssignmentFilter = React.useCallback((filterVal: string, aId?: string, aTitle?: string) => {
+    if (!filterVal || filterVal === 'ALL') return true;
+    const normFilter = filterVal.trim().toLowerCase();
+    const normId = (aId || '').trim().toLowerCase();
+    const normTitle = (aTitle || '').trim().toLowerCase();
+    if (normId && normId === normFilter) return true;
+    if (normTitle && normTitle === normFilter) return true;
+    const matchedAssign = assignments.find(
+      a => (a.id && a.id.trim().toLowerCase() === normFilter) || a.title.trim().toLowerCase() === normFilter
+    );
+    if (matchedAssign) {
+      if (normId && matchedAssign.id && normId === matchedAssign.id.trim().toLowerCase()) return true;
+      if (normTitle && matchedAssign.title && normTitle === matchedAssign.title.trim().toLowerCase()) return true;
+    }
+    return false;
+  }, [assignments]);
 
   // Helper: ตรวจสอบว่านักเรียนได้ส่งใบงานนี้แล้วหรือยัง (เทียบทั้ง assignmentId และ ชื่องาน+วิชา)
   const findMatchingSubmission = React.useCallback((assignment: Assignment, subs: Submission[]) => {
@@ -120,35 +146,48 @@ export default function SubmissionStatusView({
     });
   }, []);
 
-  // ข้อมูลการส่งงานทั้งหมดของนักเรียนที่ค้นหา (ก่อนกรองตามสถานะ/วิชา เพื่อใช้เช็คงานค้างส่งได้แม่นยำ)
+  // ข้อมูลการส่งงานทั้งหมดตามคำค้นหา + ชั้น + ห้อง (ก่อนกรองวิชา/ใบงาน/สถานะ)
   const studentAllSubmissions = useMemo(() => {
-    if (!hasSearched) return [];
+    if (!shouldShowResults) return [];
     const q = searchTerm.trim().toLowerCase();
     const qNoPrefix = stripThaiPrefix(searchTerm).toLowerCase();
 
-    return submissions.filter((item) => {
-      const itemNameLower = item.studentName.toLowerCase();
-      const itemNoPrefix = stripThaiPrefix(item.studentName).toLowerCase();
-      const matchStudent =
-        itemNameLower.includes(q) ||
-        (qNoPrefix && itemNoPrefix.includes(qNoPrefix)) ||
-        item.studentNumber.trim().toLowerCase() === q;
+    return submissions
+      .filter((item) => {
+        const itemNameLower = item.studentName.toLowerCase();
+        const itemNoPrefix = stripThaiPrefix(item.studentName).toLowerCase();
+        const matchStudent = !hasSearched || (
+          itemNameLower.includes(q) ||
+          (qNoPrefix && itemNoPrefix.includes(qNoPrefix)) ||
+          item.studentNumber.trim().toLowerCase() === q
+        );
 
-      const matchGrade = selectedGrade === 'ALL' || normalizeGradeLevel(item.gradeLevel) === normalizeGradeLevel(selectedGrade);
-      const matchRoom = selectedRoom === 'ALL' || normalizeRoom(item.room) === normalizeRoom(selectedRoom);
+        const matchGrade = selectedGrade === 'ALL' || normalizeGradeLevel(item.gradeLevel) === normalizeGradeLevel(selectedGrade);
+        const matchRoom = selectedRoom === 'ALL' || normalizeRoom(item.room) === normalizeRoom(selectedRoom);
 
-      return matchStudent && matchGrade && matchRoom;
-    });
-  }, [submissions, searchTerm, hasSearched, selectedGrade, selectedRoom]);
+        return matchStudent && matchGrade && matchRoom;
+      })
+      .sort((a, b) => {
+        if (a.gradeLevel !== b.gradeLevel) return (a.gradeLevel || '').localeCompare(b.gradeLevel || '');
+        const roomA = parseInt(normalizeRoom(a.room), 10) || 0;
+        const roomB = parseInt(normalizeRoom(b.room), 10) || 0;
+        if (roomA !== roomB) return roomA - roomB;
+        const numA = parseInt(a.studentNumber, 10) || 0;
+        const numB = parseInt(b.studentNumber, 10) || 0;
+        if (numA !== numB) return numA - numB;
+        return (a.studentName || '').localeCompare(b.studentName || '');
+      });
+  }, [submissions, searchTerm, hasSearched, shouldShowResults, selectedGrade, selectedRoom]);
 
-  // Filtered submissions for display (กรองเพิ่มตามวิชาและสถานะ)
+  // Filtered submissions for display (กรองเพิ่มตามวิชา ใบงาน และสถานะ)
   const filteredSubmissions = useMemo(() => {
     return studentAllSubmissions.filter((item) => {
       const matchSubject = matchesSubjectFilter(selectedSubject, item.subjectCode, item.subjectName);
+      const matchAssignment = matchesAssignmentFilter(selectedAssignment, item.assignmentId, item.assignmentName);
       const matchStatus = selectedStatus === 'ALL' || selectedStatus === 'ค้างส่ง' || item.status === selectedStatus;
-      return matchSubject && matchStatus;
+      return matchSubject && matchAssignment && matchStatus;
     });
-  }, [studentAllSubmissions, selectedSubject, selectedStatus, matchesSubjectFilter]);
+  }, [studentAllSubmissions, selectedSubject, selectedAssignment, selectedStatus, matchesSubjectFilter, matchesAssignmentFilter]);
 
   // Detected student info from submissions or uploaded student roster
   const detectedStudentInfo = useMemo(() => {
@@ -199,7 +238,7 @@ export default function SubmissionStatusView({
   // Relevant assignments according to student grade (or all if grade is not yet known)
   const targetGrade = selectedGrade !== 'ALL'
     ? selectedGrade
-    : (detectedStudentInfo.hasDetectedGrade ? detectedStudentInfo.gradeLevel : 'ALL');
+    : (hasSearched && detectedStudentInfo.hasDetectedGrade ? detectedStudentInfo.gradeLevel : 'ALL');
 
   const relevantAssignments = useMemo(() => {
     return assignments.filter(a => {
@@ -213,17 +252,77 @@ export default function SubmissionStatusView({
     });
   }, [assignments, targetGrade]);
 
-  // งานที่ค้างส่งทั้งหมด (ทุกรายวิชา) ของนักเรียนคนนี้
+  // รายชื่อใบงานที่มีให้เลือกในตัวกรอง (กรองตามระดับชั้นและวิชาที่เลือก และรวมชื่อใบงานที่มีใน Sheet หากยังไม่มีใน list)
+  const availableAssignments = useMemo(() => {
+    const map = new Map<string, { value: string; title: string; subjectCode: string; subjectName: string; label: string }>();
+
+    relevantAssignments
+      .filter(a => matchesSubjectFilter(selectedSubject, a.subjectCode, a.subjectName))
+      .forEach(a => {
+        const title = (a.title || '').trim();
+        if (!title) return;
+        const value = a.id || title;
+        const key = `${(a.subjectCode || '').trim().toLowerCase()}__${title.toLowerCase()}`;
+        if (!map.has(key)) {
+          map.set(key, {
+            value,
+            title,
+            subjectCode: a.subjectCode || '',
+            subjectName: a.subjectName || '',
+            label: a.subjectCode ? `${title} (${a.subjectCode})` : title,
+          });
+        }
+      });
+
+    submissions
+      .filter(s => {
+        const matchGrade = targetGrade === 'ALL' || normalizeGradeLevel(s.gradeLevel) === normalizeGradeLevel(targetGrade);
+        const matchSubj = matchesSubjectFilter(selectedSubject, s.subjectCode, s.subjectName);
+        return matchGrade && matchSubj && Boolean((s.assignmentName || '').trim());
+      })
+      .forEach(s => {
+        const title = (s.assignmentName || '').trim();
+        const key = `${(s.subjectCode || '').trim().toLowerCase()}__${title.toLowerCase()}`;
+        if (!map.has(key)) {
+          const value = s.assignmentId || title;
+          map.set(key, {
+            value,
+            title,
+            subjectCode: s.subjectCode || '',
+            subjectName: s.subjectName || '',
+            label: s.subjectCode ? `${title} (${s.subjectCode})` : title,
+          });
+        }
+      });
+
+    return Array.from(map.values());
+  }, [relevantAssignments, submissions, targetGrade, selectedSubject, matchesSubjectFilter]);
+
+  useEffect(() => {
+    if (selectedAssignment !== 'ALL' && !availableAssignments.some(a => a.value === selectedAssignment)) {
+      setSelectedAssignment('ALL');
+    }
+  }, [availableAssignments, selectedAssignment]);
+
+  const selectedAssignmentInfo = useMemo(() => {
+    if (selectedAssignment === 'ALL') return null;
+    return availableAssignments.find(a => a.value === selectedAssignment) || null;
+  }, [selectedAssignment, availableAssignments]);
+
+  // งานที่ค้างส่งทั้งหมด (ทุกรายวิชา) ของนักเรียนที่ค้นหา
   const allPendingAssignments = useMemo(() => {
     if (!hasSearched) return [];
     return relevantAssignments.filter(a => !findMatchingSubmission(a, studentAllSubmissions));
   }, [relevantAssignments, studentAllSubmissions, hasSearched, findMatchingSubmission]);
 
-  // งานที่ค้างส่ง (กรองตามวิชาที่เลือก)
+  // งานที่ค้างส่ง (กรองตามวิชาและใบงานที่เลือก)
   const pendingAssignments = useMemo(() => {
     if (!hasSearched) return [];
-    return allPendingAssignments.filter(a => matchesSubjectFilter(selectedSubject, a.subjectCode, a.subjectName));
-  }, [allPendingAssignments, hasSearched, selectedSubject, matchesSubjectFilter]);
+    return allPendingAssignments.filter(
+      a => matchesSubjectFilter(selectedSubject, a.subjectCode, a.subjectName) &&
+           matchesAssignmentFilter(selectedAssignment, a.id, a.title)
+    );
+  }, [allPendingAssignments, hasSearched, selectedSubject, selectedAssignment, matchesSubjectFilter, matchesAssignmentFilter]);
 
   // Group all assignments by Subject for the "เช็คสถานะแยกตามรายวิชา" tab
   const subjectGroups = useMemo(() => {
@@ -272,10 +371,26 @@ export default function SubmissionStatusView({
     return Array.from(map.values());
   }, [relevantAssignments, studentAllSubmissions, findMatchingSubmission]);
 
-  // กลุ่มรายวิชาที่ผ่านตัวกรอง selectedSubject
+  // กลุ่มรายวิชาที่ผ่านตัวกรอง selectedSubject และ selectedAssignment
   const filteredSubjectGroups = useMemo(() => {
-    return subjectGroups.filter(g => matchesSubjectFilter(selectedSubject, g.code, g.name));
-  }, [subjectGroups, selectedSubject, matchesSubjectFilter]);
+    return subjectGroups
+      .filter(g => matchesSubjectFilter(selectedSubject, g.code, g.name))
+      .map(g => {
+        if (selectedAssignment === 'ALL') return g;
+        const filteredTotal = g.totalAssignments.filter(a => matchesAssignmentFilter(selectedAssignment, a.id, a.title));
+        const filteredSubmitted = g.submitted.filter(s => matchesAssignmentFilter(selectedAssignment, s.assignmentId, s.assignmentName));
+        const filteredPending = g.pending.filter(a => matchesAssignmentFilter(selectedAssignment, a.id, a.title));
+        return {
+          ...g,
+          totalAssignments: filteredTotal,
+          submitted: filteredSubmitted,
+          pending: filteredPending,
+          earnedScore: filteredSubmitted.reduce((sum, s) => sum + (s.score || 0), 0),
+          maxScore: filteredTotal.reduce((sum, a) => sum + (a.maxScore || 0), 0),
+        };
+      })
+      .filter(g => selectedAssignment === 'ALL' || g.totalAssignments.length > 0 || g.submitted.length > 0);
+  }, [subjectGroups, selectedSubject, selectedAssignment, matchesSubjectFilter, matchesAssignmentFilter]);
 
   // รายชื่อวิชาทั้งหมดที่มีในระบบ (พร้อมนับจำนวนงานที่ค้างส่งในแต่ละวิชาเมื่อค้นหาแล้ว)
   const availableSubjects = useMemo(() => {
@@ -346,6 +461,18 @@ export default function SubmissionStatusView({
     }
   };
 
+  const handleResetAllFilters = () => {
+    setSearchTerm('');
+    setSelectedGrade('ALL');
+    setSelectedRoom('ALL');
+    setSelectedSubject('ALL');
+    setSelectedAssignment('ALL');
+    setSelectedStatus('ALL');
+    if (onClearInitialSearch) {
+      onClearInitialSearch();
+    }
+  };
+
   // Quick Action to Submit a new work or pending work
   const handleQuickSubmit = (assignment?: Assignment) => {
     if (!onNavigateToSubmit) return;
@@ -355,44 +482,54 @@ export default function SubmissionStatusView({
         teacherName: assignment.teacherName,
         subjectCode: assignment.subjectCode,
         assignmentId: assignment.id,
-        studentName: detectedStudentInfo.studentName,
-        studentNumber: detectedStudentInfo.studentNumber,
+        studentName: hasSearched ? detectedStudentInfo.studentName : '',
+        studentNumber: hasSearched ? detectedStudentInfo.studentNumber : '',
         gradeLevel: detectedStudentInfo.gradeLevel,
         room: detectedStudentInfo.room,
       });
     } else {
       onNavigateToSubmit({
-        studentName: detectedStudentInfo.studentName,
-        studentNumber: detectedStudentInfo.studentNumber,
+        studentName: hasSearched ? detectedStudentInfo.studentName : '',
+        studentNumber: hasSearched ? detectedStudentInfo.studentNumber : '',
         gradeLevel: detectedStudentInfo.gradeLevel,
         room: detectedStudentInfo.room,
       });
     }
   };
 
+  const activeFilterSummaryLabel = useMemo(() => {
+    const parts: string[] = [];
+    if (hasSearched) parts.push(searchTerm.trim());
+    if (selectedGrade !== 'ALL') parts.push(selectedGrade);
+    if (selectedRoom !== 'ALL') parts.push(`ห้อง${selectedRoom}`);
+    if (selectedSubjectInfo) parts.push(selectedSubjectInfo.code || selectedSubjectInfo.label);
+    if (selectedAssignmentInfo) parts.push(selectedAssignmentInfo.title);
+    return parts.join('_') || 'ทั้งหมด';
+  }, [hasSearched, searchTerm, selectedGrade, selectedRoom, selectedSubjectInfo, selectedAssignmentInfo]);
+
   const handleExportExcel = () => {
-    if (!hasSearched) {
-      alertService.info('กรุณาระบุชื่อนักเรียนก่อน', 'โปรดพิมพ์ชื่อนักเรียนในช่องค้นหาก่อนทำการส่งออกข้อมูล');
+    if (!shouldShowResults) {
+      alertService.info('กรุณาค้นหาหรือเลือกตัวกรองก่อน', 'โปรดพิมพ์ชื่อนักเรียน หรือเลือกกรอง ชั้น / ห้อง / วิชา / ใบงาน ก่อนส่งออกข้อมูล');
       return;
     }
     if (filteredSubmissions.length === 0) {
-      alertService.info('ไม่มีข้อมูลสำหรับส่งออก', 'ไม่พบรายการส่งงานของนักเรียนที่ค้นหา');
+      alertService.info('ไม่มีข้อมูลสำหรับส่งออก', 'ไม่พบรายการส่งงานตามเงื่อนไขที่เลือก');
       return;
     }
-    storageService.exportToExcel(filteredSubmissions, `ตารางส่งงานและคะแนน_${searchTerm.trim()}`);
+    storageService.exportToExcel(filteredSubmissions, `ตารางส่งงานและคะแนน_${activeFilterSummaryLabel}`);
     alertService.success('ดาวน์โหลดไฟล์ Excel สำเร็จ', 'ไฟล์ .xlsx ได้รับการบันทึกลงในเครื่องของคุณแล้ว');
   };
 
   const handleExportPdf = () => {
-    if (!hasSearched) {
-      alertService.info('กรุณาระบุชื่อนักเรียนก่อน', 'โปรดพิมพ์ชื่อนักเรียนในช่องค้นหาก่อนทำการส่งออกข้อมูล');
+    if (!shouldShowResults) {
+      alertService.info('กรุณาค้นหาหรือเลือกตัวกรองก่อน', 'โปรดพิมพ์ชื่อนักเรียน หรือเลือกกรอง ชั้น / ห้อง / วิชา / ใบงาน ก่อนส่งออกข้อมูล');
       return;
     }
     if (filteredSubmissions.length === 0) {
-      alertService.info('ไม่มีข้อมูลสำหรับส่งออก', 'ไม่พบรายการส่งงานของนักเรียนที่ค้นหา');
+      alertService.info('ไม่มีข้อมูลสำหรับส่งออก', 'ไม่พบรายการส่งงานตามเงื่อนไขที่เลือก');
       return;
     }
-    storageService.exportToPdf(filteredSubmissions, `ตารางส่งงานและคะแนน_${searchTerm.trim()}`, `รายงานผลการส่งงาน: ${searchTerm.trim()}`);
+    storageService.exportToPdf(filteredSubmissions, `ตารางส่งงานและคะแนน_${activeFilterSummaryLabel}`, `รายงานผลการส่งงาน: ${activeFilterSummaryLabel.replace(/_/g, ' • ')}`);
   };
 
   return (
@@ -463,15 +600,15 @@ export default function SubmissionStatusView({
         {/* Informational Subtitle */}
         <div className="mt-4 pt-4 border-t border-purple-100/70 flex items-center justify-between flex-wrap gap-2 text-xs text-gray-600">
           <div className="flex items-center gap-2">
-            <span className="text-base">🔒</span>
-            <span className="font-medium">แสดงข้อมูลผลงาน คะแนน และรายการค้างส่งของนักเรียนที่พิมพ์ค้นหาเท่านั้น</span>
+            <span className="text-base">🔎</span>
+            <span className="font-medium">ค้นหาด้วยชื่อนักเรียน หรือเลือกกรองแสดงผลตาม ชั้น • ห้อง • วิชา • ใบงาน ได้ทันที</span>
           </div>
-          {hasSearched && (
+          {shouldShowResults && (
             <button
-              onClick={handleClearSearch}
+              onClick={handleResetAllFilters}
               className="text-violet-700 hover:text-violet-900 font-semibold cursor-pointer underline flex items-center gap-1"
             >
-              <span>ล้างการค้นหา</span>
+              <span>ล้างการค้นหาและตัวกรองทั้งหมด</span>
               <span>✕</span>
             </button>
           )}
@@ -480,15 +617,15 @@ export default function SubmissionStatusView({
 
       {/* Search & Filter Bar */}
       <div className="bg-white/95 backdrop-blur-md rounded-3xl p-6 shadow-xl shadow-purple-100/30 border border-purple-100/70 space-y-3">
-        <div className="flex flex-col md:flex-row gap-3 items-center">
+        <div className="flex flex-col gap-3">
           {/* Real-time Search Box */}
-          <div className="relative flex-1 w-full">
+          <div className="relative w-full">
             <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-violet-500" size={18} />
             <input
               type="text"
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
-              placeholder="🔍 พิมพ์ชื่อ หรือ นามสกุล นักเรียน เพื่อเช็คสถานะและงานค้างส่งทันที (เช่น สมชาย หรือ ท่าบ่อ)..."
+              placeholder="🔍 พิมพ์ชื่อ หรือ นามสกุล นักเรียน (หรือเลือกกรอง ชั้น / ห้อง / วิชา / ใบงาน ด้านล่าง)..."
               className="w-full pl-11 pr-20 py-3.5 bg-purple-50/20 border border-purple-200/80 rounded-2xl text-sm font-medium focus:bg-white focus:outline-none focus:ring-2 focus:ring-purple-300 focus:border-purple-400 transition-all shadow-inner"
             />
             {searchTerm && (
@@ -501,13 +638,39 @@ export default function SubmissionStatusView({
             )}
           </div>
 
-          {/* Filters */}
-          <div className="flex flex-wrap items-center gap-2 w-full md:w-auto">
+          {/* 5 Filters Grid: ชั้น, ห้อง, วิชา, ใบงาน, สถานะ */}
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2.5 w-full">
+            {/* ชั้น */}
+            <select
+              value={selectedGrade}
+              onChange={(e) => setSelectedGrade(e.target.value)}
+              className="w-full px-3 py-2.5 bg-purple-50/25 border border-purple-200/80 rounded-xl text-xs font-semibold text-gray-800 focus:outline-none focus:ring-2 focus:ring-purple-300 cursor-pointer"
+              title="กรองตามระดับชั้น"
+            >
+              <option value="ALL">🏫 ทุกระดับชั้น</option>
+              {GRADE_LEVELS.map(g => (
+                <option key={g} value={g}>ระดับชั้น {g}</option>
+              ))}
+            </select>
+
+            {/* ห้อง */}
+            <select
+              value={selectedRoom}
+              onChange={(e) => setSelectedRoom(e.target.value)}
+              className="w-full px-3 py-2.5 bg-purple-50/25 border border-purple-200/80 rounded-xl text-xs font-semibold text-gray-800 focus:outline-none focus:ring-2 focus:ring-purple-300 cursor-pointer"
+              title="กรองตามห้องเรียน"
+            >
+              <option value="ALL">🚪 ทุกห้อง (1-14)</option>
+              {ROOMS.map(r => (
+                <option key={r} value={r}>ห้อง {r}</option>
+              ))}
+            </select>
+
             {/* วิชา (กรองตามรายวิชา) */}
             <select
               value={selectedSubject}
               onChange={(e) => setSelectedSubject(e.target.value)}
-              className="px-3.5 py-2.5 bg-purple-50/30 border border-purple-200/80 rounded-xl text-xs font-semibold text-violet-950 focus:outline-none focus:ring-2 focus:ring-purple-300 cursor-pointer max-w-[230px]"
+              className="w-full px-3 py-2.5 bg-purple-50/35 border border-purple-200/80 rounded-xl text-xs font-semibold text-violet-950 focus:outline-none focus:ring-2 focus:ring-purple-300 cursor-pointer"
               title="เลือกกรองตามรายวิชาเพื่อเช็คงานที่ส่งแล้วและงานที่ยังไม่ส่ง"
             >
               <option value="ALL">📚 ทุกรายวิชา ({availableSubjects.length})</option>
@@ -518,27 +681,18 @@ export default function SubmissionStatusView({
               ))}
             </select>
 
-            {/* ชั้น */}
+            {/* ใบงาน (กรองตามใบงาน/ชิ้นงาน) */}
             <select
-              value={selectedGrade}
-              onChange={(e) => setSelectedGrade(e.target.value)}
-              className="px-3.5 py-2.5 bg-purple-50/20 border border-purple-200/70 rounded-xl text-xs font-medium text-gray-700 focus:outline-none focus:ring-2 focus:ring-purple-300 cursor-pointer"
+              value={selectedAssignment}
+              onChange={(e) => setSelectedAssignment(e.target.value)}
+              className="w-full px-3 py-2.5 bg-indigo-50/40 border border-indigo-200/80 rounded-xl text-xs font-semibold text-indigo-950 focus:outline-none focus:ring-2 focus:ring-indigo-300 cursor-pointer"
+              title="เลือกกรองตามใบงาน / ชิ้นงาน"
             >
-              <option value="ALL">🏫 ทุกระดับชั้น</option>
-              {GRADE_LEVELS.map(g => (
-                <option key={g} value={g}>{g}</option>
-              ))}
-            </select>
-
-            {/* ห้อง */}
-            <select
-              value={selectedRoom}
-              onChange={(e) => setSelectedRoom(e.target.value)}
-              className="px-3.5 py-2.5 bg-purple-50/20 border border-purple-200/70 rounded-xl text-xs font-medium text-gray-700 focus:outline-none focus:ring-2 focus:ring-purple-300 cursor-pointer"
-            >
-              <option value="ALL">🚪 ทุกห้อง (1-14)</option>
-              {ROOMS.map(r => (
-                <option key={r} value={r}>ห้อง {r}</option>
+              <option value="ALL">📝 ทุกใบงาน ({availableAssignments.length})</option>
+              {availableAssignments.map(a => (
+                <option key={a.value} value={a.value}>
+                  {a.label}
+                </option>
               ))}
             </select>
 
@@ -554,7 +708,8 @@ export default function SubmissionStatusView({
                   setActiveSubTab('submitted');
                 }
               }}
-              className="px-3.5 py-2.5 bg-purple-50/20 border border-purple-200/70 rounded-xl text-xs font-medium text-gray-700 focus:outline-none focus:ring-2 focus:ring-purple-300 cursor-pointer"
+              className="w-full col-span-2 sm:col-span-1 px-3 py-2.5 bg-purple-50/25 border border-purple-200/80 rounded-xl text-xs font-semibold text-gray-800 focus:outline-none focus:ring-2 focus:ring-purple-300 cursor-pointer"
+              title="กรองตามสถานะการส่งงาน"
             >
               <option value="ALL">🏷️ สถานะทั้งหมด</option>
               <option value="ค้างส่ง">⚠️ ค้างส่ง (ยังไม่ส่ง)</option>
@@ -567,19 +722,20 @@ export default function SubmissionStatusView({
         <div className="text-[11px] text-gray-500 flex items-center justify-between flex-wrap gap-2 px-1">
           <div className="flex items-center gap-1.5">
             <span className="w-1.5 h-1.5 rounded-full bg-violet-500" />
-            <span>⚡ ค้นหาแบบ Real-time: พิมพ์ชื่อจริง หรือนามสกุล และเลือกกรองรายวิชา เพื่อดูงานที่ยังไม่ส่งของแต่ละวิชา</span>
+            <span>⚡ กรองข้อมูลได้ทันที: เลือกดูตาม ชั้น ห้อง วิชา ใบงาน หรือพิมพ์ชื่อนักเรียนเพื่อดูงานที่ยังไม่ส่งรายบุคคล</span>
           </div>
           <div className="flex items-center gap-2 flex-wrap">
-            {hasSearched && (
+            {shouldShowResults && (
               <span className="text-violet-700 font-semibold">
-                ระดับชั้นที่วิเคราะห์: {targetGrade === 'ALL' ? 'ทุกระดับชั้น' : targetGrade}
+                ระดับชั้นที่แสดง: {targetGrade === 'ALL' ? 'ทุกระดับชั้น' : targetGrade}
               </span>
             )}
-            {(selectedSubject !== 'ALL' || selectedGrade !== 'ALL' || selectedRoom !== 'ALL' || selectedStatus !== 'ALL') && (
+            {hasActiveFilter && (
               <button
                 type="button"
                 onClick={() => {
                   setSelectedSubject('ALL');
+                  setSelectedAssignment('ALL');
                   setSelectedGrade('ALL');
                   setSelectedRoom('ALL');
                   setSelectedStatus('ALL');
@@ -593,51 +749,26 @@ export default function SubmissionStatusView({
         </div>
       </div>
 
-      {/* Main Content: Prompt when not searched, or Student Results when searched */}
-      {!hasSearched ? (
+      {/* Main Content: Prompt when neither searched nor filtered, or Results when active */}
+      {!shouldShowResults ? (
         <div className="bg-gradient-to-b from-white/95 via-purple-50/30 to-pink-50/30 backdrop-blur-md rounded-3xl p-8 md:p-12 shadow-xl shadow-purple-100/30 border border-purple-100/80 text-center space-y-6">
           <div className="w-20 h-20 rounded-3xl bg-gradient-to-tr from-violet-500 via-indigo-500 to-pink-500 text-white flex items-center justify-center mx-auto shadow-lg shadow-purple-200 text-3xl">
             🔍
           </div>
           <div className="max-w-lg mx-auto space-y-2">
             <h2 className="text-xl md:text-2xl font-bold text-gray-900 flex items-center justify-center gap-2">
-              <span>พิมพ์ชื่อนักเรียนเพื่อเช็คสถานะ & งานที่ยังไม่ส่ง</span>
+              <span>ค้นหาชื่อ หรือเลือกกรอง ชั้น / ห้อง / วิชา / ใบงาน</span>
               <span>✨</span>
             </h2>
             <p className="text-sm text-gray-500 leading-relaxed">
-              ระบบสามารถ <span className="font-semibold text-violet-700">เลือกกรองดูรายวิชา</span> เพื่อตรวจเช็กได้ทันทีว่า <span className="font-semibold text-rose-600">แต่ละวิชามีงานชิ้นไหนที่ยังไม่ส่งบ้าง</span>
+              สามารถ <span className="font-semibold text-violet-700">เลือกกรองตามระดับชั้น ห้องเรียน รายวิชา และใบงาน</span> ด้านบนเพื่อแสดงรายการส่งงานได้ทันที หรือพิมพ์ชื่อนักเรียนเพื่อตรวจดูว่า <span className="font-semibold text-rose-600">มีงานชิ้นไหนที่ยังไม่ส่งบ้าง</span>
             </p>
           </div>
-
-          {selectedSubject !== 'ALL' && (
-            <div className="max-w-2xl mx-auto text-left bg-white/90 rounded-2xl p-4 border border-purple-200 shadow-sm space-y-2">
-              <div className="flex items-center justify-between gap-2">
-                <span className="text-xs font-bold text-violet-800">
-                  📚 ใบงานทั้งหมดในวิชา {selectedSubjectInfo?.label} ({relevantAssignments.filter(a => matchesSubjectFilter(selectedSubject, a.subjectCode, a.subjectName)).length} งาน)
-                </span>
-                <span className="text-[11px] text-amber-700 font-semibold">
-                  กรุณาพิมพ์ชื่อนักเรียนด้านบนเพื่อเช็คงานที่ยังไม่ส่ง
-                </span>
-              </div>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                {relevantAssignments
-                  .filter(a => matchesSubjectFilter(selectedSubject, a.subjectCode, a.subjectName))
-                  .map(a => (
-                    <div key={a.id} className="p-2.5 rounded-xl bg-purple-50/50 border border-purple-100 text-xs">
-                      <div className="font-bold text-gray-900 truncate" title={a.title}>{a.title}</div>
-                      <div className="text-[11px] text-gray-500 mt-0.5">
-                        คะแนนเต็ม {a.maxScore} คะแนน • ครู{a.teacherName}
-                      </div>
-                    </div>
-                  ))}
-              </div>
-            </div>
-          )}
 
           <div className="flex flex-wrap items-center justify-center gap-3">
             <div className="inline-flex items-center gap-2 px-4 py-2 bg-gradient-to-r from-violet-100/80 via-purple-100/80 to-pink-100/80 border border-purple-200/80 rounded-2xl text-xs text-violet-900 font-medium shadow-xs">
               <span>💡</span>
-              <span>พิมพ์ชื่อหรือนามสกุลในช่องค้นหาด้านบน เพื่อเริ่มต้นตรวจสอบ</span>
+              <span>เลือก ชั้น / ห้อง / วิชา / ใบงาน หรือพิมพ์ชื่อนักเรียนในช่องค้นหาด้านบน</span>
             </div>
             {onNavigateToSubmit && (
               <button
@@ -688,114 +819,133 @@ export default function SubmissionStatusView({
                 </span>
                 <AlertCircle size={18} className={studentPendingCount > 0 ? 'text-rose-500 animate-pulse' : 'text-amber-500'} />
               </div>
-              <div className="text-2xl md:text-3xl font-extrabold text-amber-950 flex items-baseline gap-1.5">
-                <span className={studentPendingCount > 0 ? 'text-rose-600' : 'text-emerald-600'}>
-                  {studentPendingCount}
-                </span>
-                <span className="text-xs text-gray-500 font-normal">งาน</span>
-              </div>
-              <div className="text-[11px] font-medium text-amber-900 mt-0.5">
-                {studentPendingCount > 0 ? '🔴 มีงานที่ยังไม่ได้ส่ง (คลิกเพื่อเช็ค)' : '✅ ส่งครบทุกงานแล้ว 🎉'}
-              </div>
-            </div>
-
-            {/* Card 3: ตรวจแล้ว */}
-            <div className="bg-gradient-to-br from-emerald-50/90 to-teal-50/90 backdrop-blur-md p-4 md:p-5 rounded-2xl border border-emerald-200/70 shadow-md shadow-emerald-100/40">
-              <div className="flex items-center justify-between text-emerald-700 mb-1">
-                <span className="text-xs font-bold uppercase flex items-center gap-1">
-                  <span>✅</span> ตรวจแล้ว
-                </span>
-                <CheckCircle size={18} />
-              </div>
-              <div className="text-2xl md:text-3xl font-extrabold text-emerald-950">{studentGradedCount}</div>
-              <div className="text-[11px] text-emerald-700 mt-0.5">
-                {studentTotalCount > 0 ? Math.round((studentGradedCount / studentTotalCount) * 100) : 0}% ของงานที่ส่ง
-              </div>
-            </div>
-
-            {/* Card 4: คะแนนสะสม */}
-            <div className="bg-gradient-to-br from-pink-50/90 to-rose-50/90 backdrop-blur-md p-4 md:p-5 rounded-2xl border border-pink-200/70 shadow-md shadow-pink-100/40">
-              <div className="flex items-center justify-between text-pink-700 mb-1">
-                <span className="text-xs font-bold uppercase flex items-center gap-1">
-                  <span>🏆</span> คะแนนรวมสะสม
-                </span>
-                <Award size={18} />
-              </div>
-              <div className="text-2xl md:text-3xl font-extrabold text-pink-950 flex items-baseline gap-1">
-                <span>{studentTotalEarned}</span>
-                <span className="text-xs text-gray-500 font-normal">/ {studentTotalMax}</span>
-              </div>
-              <div className="text-[11px] text-pink-700 mt-0.5">
-                {studentTotalMax > 0 ? `${Math.round((studentTotalEarned / studentTotalMax) * 100)}% ของคะแนนเต็ม 🌟` : 'คะแนนสะสม'}
-              </div>
-            </div>
-          </div>
-
-          {/* Quick Subject Filter Bar (คลิกเลือกแต่ละวิชาเพื่อดูงานที่ยังไม่ส่งได้ทันที) */}
-          {availableSubjects.length > 0 && (
-            <div className="bg-white/95 backdrop-blur-md rounded-2xl p-3.5 shadow-md border border-purple-100/80 space-y-2">
-              <div className="flex items-center justify-between flex-wrap gap-2 px-1">
-                <div className="flex items-center gap-1.5 text-xs font-bold text-violet-950">
-                  <BookOpen size={14} className="text-violet-600" />
-                  <span>📚 เลือกกรองตามรายวิชา (เช็คงานที่ยังไม่ส่งแยกวิชา):</span>
+                <div className="text-2xl md:text-3xl font-extrabold text-amber-950 flex items-baseline gap-1.5">
+                  <span className={!hasSearched ? 'text-amber-700' : studentPendingCount > 0 ? 'text-rose-600' : 'text-emerald-600'}>
+                    {hasSearched ? studentPendingCount : '-'}
+                  </span>
+                  <span className="text-xs text-gray-500 font-normal">งาน</span>
                 </div>
-                {selectedSubject !== 'ALL' && (
+                <div className="text-[11px] font-medium text-amber-900 mt-0.5">
+                  {!hasSearched
+                    ? '🔍 พิมพ์ชื่อนักเรียนเพื่อเช็คงานค้างส่ง'
+                    : studentPendingCount > 0 ? '🔴 มีงานที่ยังไม่ได้ส่ง (คลิกเพื่อเช็ค)' : '✅ ส่งครบทุกงานแล้ว 🎉'}
+                </div>
+              </div>
+
+              {/* Card 3: ตรวจแล้ว */}
+              <div className="bg-gradient-to-br from-emerald-50/90 to-teal-50/90 backdrop-blur-md p-4 md:p-5 rounded-2xl border border-emerald-200/70 shadow-md shadow-emerald-100/40">
+                <div className="flex items-center justify-between text-emerald-700 mb-1">
+                  <span className="text-xs font-bold uppercase flex items-center gap-1">
+                    <span>✅</span> ตรวจแล้ว
+                  </span>
+                  <CheckCircle size={18} />
+                </div>
+                <div className="text-2xl md:text-3xl font-extrabold text-emerald-950">{studentGradedCount}</div>
+                <div className="text-[11px] text-emerald-700 mt-0.5">
+                  {studentTotalCount > 0 ? Math.round((studentGradedCount / studentTotalCount) * 100) : 0}% ของงานที่ส่ง
+                </div>
+              </div>
+
+              {/* Card 4: คะแนนสะสม */}
+              <div className="bg-gradient-to-br from-pink-50/90 to-rose-50/90 backdrop-blur-md p-4 md:p-5 rounded-2xl border border-pink-200/70 shadow-md shadow-pink-100/40">
+                <div className="flex items-center justify-between text-pink-700 mb-1">
+                  <span className="text-xs font-bold uppercase flex items-center gap-1">
+                    <span>🏆</span> คะแนนรวมสะสม
+                  </span>
+                  <Award size={18} />
+                </div>
+                <div className="text-2xl md:text-3xl font-extrabold text-pink-950 flex items-baseline gap-1">
+                  <span>{studentTotalEarned}</span>
+                  <span className="text-xs text-gray-500 font-normal">/ {studentTotalMax}</span>
+                </div>
+                <div className="text-[11px] text-pink-700 mt-0.5">
+                  {studentTotalMax > 0 ? `${Math.round((studentTotalEarned / studentTotalMax) * 100)}% ของคะแนนเต็ม 🌟` : 'คะแนนสะสม'}
+                </div>
+              </div>
+            </div>
+
+            {/* Quick Subject Filter Bar (คลิกเลือกแต่ละวิชาเพื่อดูงานที่ยังไม่ส่งได้ทันที) */}
+            {availableSubjects.length > 0 && (
+              <div className="bg-white/95 backdrop-blur-md rounded-2xl p-3.5 shadow-md border border-purple-100/80 space-y-2">
+                <div className="flex items-center justify-between flex-wrap gap-2 px-1">
+                  <div className="flex items-center gap-1.5 text-xs font-bold text-violet-950">
+                    <BookOpen size={14} className="text-violet-600" />
+                    <span>📚 เลือกกรองตามรายวิชา {hasSearched ? '(เช็คงานที่ยังไม่ส่งแยกวิชา)' : '(คลิกเพื่อกรองแสดงเฉพาะวิชานั้น)'}:</span>
+                  </div>
+                  {selectedSubject !== 'ALL' && (
+                    <button
+                      type="button"
+                      onClick={() => setSelectedSubject('ALL')}
+                      className="text-[11px] font-bold text-violet-700 hover:text-violet-900 underline cursor-pointer"
+                    >
+                      แสดงทุกรายวิชา
+                    </button>
+                  )}
+                </div>
+                <div className="flex items-center gap-2 overflow-x-auto pb-1">
                   <button
                     type="button"
                     onClick={() => setSelectedSubject('ALL')}
-                    className="text-[11px] font-bold text-violet-700 hover:text-violet-900 underline cursor-pointer"
+                    className={`px-3 py-1.5 rounded-xl text-xs font-bold whitespace-nowrap transition-all cursor-pointer border flex items-center gap-1.5 ${
+                      selectedSubject === 'ALL'
+                        ? 'bg-gradient-to-r from-violet-600 to-indigo-600 text-white border-violet-500 shadow-xs'
+                        : 'bg-purple-50/50 hover:bg-purple-100/70 text-gray-700 border-purple-200/70'
+                    }`}
                   >
-                    แสดงทุกรายวิชา
-                  </button>
-                )}
-              </div>
-              <div className="flex items-center gap-2 overflow-x-auto pb-1">
-                <button
-                  type="button"
-                  onClick={() => setSelectedSubject('ALL')}
-                  className={`px-3 py-1.5 rounded-xl text-xs font-bold whitespace-nowrap transition-all cursor-pointer border flex items-center gap-1.5 ${
-                    selectedSubject === 'ALL'
-                      ? 'bg-gradient-to-r from-violet-600 to-indigo-600 text-white border-violet-500 shadow-xs'
-                      : 'bg-purple-50/50 hover:bg-purple-100/70 text-gray-700 border-purple-200/70'
-                  }`}
-                >
-                  <span>🌟 ทุกรายวิชา</span>
-                  <span className={`px-1.5 py-0.5 rounded-full text-[10px] font-black ${
-                    selectedSubject === 'ALL'
-                      ? 'bg-white/20 text-white'
-                      : allPendingAssignments.length > 0 ? 'bg-rose-100 text-rose-700' : 'bg-emerald-100 text-emerald-700'
-                  }`}>
-                    {allPendingAssignments.length > 0 ? `ค้าง ${allPendingAssignments.length}` : 'ครบ'}
-                  </span>
-                </button>
-
-                {availableSubjects.map(subj => {
-                  const isActive = selectedSubject.toLowerCase() === subj.value.toLowerCase();
-                  return (
-                    <button
-                      key={subj.value}
-                      type="button"
-                      onClick={() => setSelectedSubject(subj.value)}
-                      className={`px-3 py-1.5 rounded-xl text-xs font-bold whitespace-nowrap transition-all cursor-pointer border flex items-center gap-1.5 ${
-                        isActive
-                          ? 'bg-gradient-to-r from-violet-600 to-indigo-600 text-white border-violet-500 shadow-xs'
-                          : 'bg-white hover:bg-purple-50 text-gray-800 border-purple-200/80'
-                      }`}
-                    >
-                      <span>{subj.label}</span>
+                    <span>🌟 ทุกรายวิชา</span>
+                    {hasSearched ? (
                       <span className={`px-1.5 py-0.5 rounded-full text-[10px] font-black ${
-                        isActive
-                          ? 'bg-white/25 text-white'
-                          : subj.pendingCount > 0 ? 'bg-rose-100 text-rose-700' : 'bg-emerald-100 text-emerald-700'
+                        selectedSubject === 'ALL'
+                          ? 'bg-white/20 text-white'
+                          : allPendingAssignments.length > 0 ? 'bg-rose-100 text-rose-700' : 'bg-emerald-100 text-emerald-700'
                       }`}>
-                        {subj.pendingCount > 0 ? `ยังไม่ส่ง ${subj.pendingCount}` : '✓ ครบ'}
+                        {allPendingAssignments.length > 0 ? `ค้าง ${allPendingAssignments.length}` : 'ครบ'}
                       </span>
-                    </button>
-                  );
-                })}
+                    ) : (
+                      <span className={`px-1.5 py-0.5 rounded-full text-[10px] font-black ${
+                        selectedSubject === 'ALL' ? 'bg-white/20 text-white' : 'bg-purple-100 text-violet-700'
+                      }`}>
+                        {studentAllSubmissions.length}
+                      </span>
+                    )}
+                  </button>
+
+                  {availableSubjects.map(subj => {
+                    const isActive = selectedSubject.toLowerCase() === subj.value.toLowerCase();
+                    const subjSubmittedCount = studentAllSubmissions.filter(s => matchesSubjectFilter(subj.value, s.subjectCode, s.subjectName)).length;
+                    return (
+                      <button
+                        key={subj.value}
+                        type="button"
+                        onClick={() => setSelectedSubject(subj.value)}
+                        className={`px-3 py-1.5 rounded-xl text-xs font-bold whitespace-nowrap transition-all cursor-pointer border flex items-center gap-1.5 ${
+                          isActive
+                            ? 'bg-gradient-to-r from-violet-600 to-indigo-600 text-white border-violet-500 shadow-xs'
+                            : 'bg-white hover:bg-purple-50 text-gray-800 border-purple-200/80'
+                        }`}
+                      >
+                        <span>{subj.label}</span>
+                        {hasSearched ? (
+                          <span className={`px-1.5 py-0.5 rounded-full text-[10px] font-black ${
+                            isActive
+                              ? 'bg-white/25 text-white'
+                              : subj.pendingCount > 0 ? 'bg-rose-100 text-rose-700' : 'bg-emerald-100 text-emerald-700'
+                          }`}>
+                            {subj.pendingCount > 0 ? `ยังไม่ส่ง ${subj.pendingCount}` : '✓ ครบ'}
+                          </span>
+                        ) : (
+                          <span className={`px-1.5 py-0.5 rounded-full text-[10px] font-black ${
+                            isActive ? 'bg-white/25 text-white' : 'bg-indigo-50 text-indigo-700'
+                          }`}>
+                            ส่ง {subjSubmittedCount}
+                          </span>
+                        )}
+                      </button>
+                    );
+                  })}
+                </div>
               </div>
-            </div>
-          )}
+            )}
 
           {/* Sub-Tabs: 1. งานที่ส่งแล้ว / 2. งานที่ค้างส่ง / 3. สรุปรายวิชา */}
           <div className="flex items-center justify-between flex-wrap gap-2 border-b border-purple-200/80 pb-1">
@@ -828,9 +978,9 @@ export default function SubmissionStatusView({
                 <span className={`px-2 py-0.5 rounded-full text-xs font-black ${
                   activeSubTab === 'pending'
                     ? 'bg-white/20 text-white'
-                    : studentPendingCount > 0 ? 'bg-rose-100 text-rose-800 animate-pulse' : 'bg-emerald-100 text-emerald-800'
+                    : hasSearched && studentPendingCount > 0 ? 'bg-rose-100 text-rose-800 animate-pulse' : 'bg-emerald-100 text-emerald-800'
                 }`}>
-                  {studentPendingCount}
+                  {hasSearched ? studentPendingCount : 'เช็ครายบุคคล'}
                 </span>
               </button>
 
@@ -862,8 +1012,8 @@ export default function SubmissionStatusView({
             )}
           </div>
 
-          {/* Inline Missing Summary Banner when a specific subject is filtered on Tab 1 */}
-          {activeSubTab === 'submitted' && selectedSubject !== 'ALL' && (
+          {/* Inline Missing Summary Banner when a specific subject is filtered on Tab 1 and a student was searched */}
+          {activeSubTab === 'submitted' && hasSearched && selectedSubject !== 'ALL' && (
             <div className={`rounded-3xl p-4 sm:p-5 border shadow-md space-y-3 ${
               pendingAssignments.length > 0
                 ? 'bg-gradient-to-r from-amber-50 via-rose-50/70 to-orange-50 border-amber-300'
@@ -937,10 +1087,32 @@ export default function SubmissionStatusView({
               {filteredSubmissions.length > 0 && (
                 <div className="p-4 sm:p-5 bg-gradient-to-r from-violet-50/70 via-purple-50/60 to-pink-50/70 border-b border-purple-100/80 flex flex-wrap items-center justify-between gap-3">
                   <div className="flex items-center gap-2 flex-wrap">
-                    <span className="text-xs text-gray-600">ผลงานที่ส่งของนักเรียน:</span>
-                    <span className="px-3 py-1 bg-white border border-purple-200 rounded-full text-xs font-bold text-violet-700 shadow-xs">
-                      🧑‍🎓 {searchTerm}
-                    </span>
+                    <span className="text-xs text-gray-600">รายการผลงานที่ส่ง:</span>
+                    {hasSearched && (
+                      <span className="px-3 py-1 bg-white border border-purple-200 rounded-full text-xs font-bold text-violet-700 shadow-xs">
+                        🧑‍🎓 {searchTerm}
+                      </span>
+                    )}
+                    {selectedGrade !== 'ALL' && (
+                      <span className="px-3 py-1 bg-white border border-indigo-200 rounded-full text-xs font-bold text-indigo-700 shadow-xs">
+                        🏫 {selectedGrade}
+                      </span>
+                    )}
+                    {selectedRoom !== 'ALL' && (
+                      <span className="px-3 py-1 bg-white border border-blue-200 rounded-full text-xs font-bold text-blue-700 shadow-xs">
+                        🚪 ห้อง {selectedRoom}
+                      </span>
+                    )}
+                    {selectedSubjectInfo && (
+                      <span className="px-3 py-1 bg-white border border-purple-200 rounded-full text-xs font-bold text-purple-800 shadow-xs">
+                        📚 {selectedSubjectInfo.label}
+                      </span>
+                    )}
+                    {selectedAssignmentInfo && (
+                      <span className="px-3 py-1 bg-white border border-teal-200 rounded-full text-xs font-bold text-teal-800 shadow-xs">
+                        📝 {selectedAssignmentInfo.title}
+                      </span>
+                    )}
                     <span className="text-xs text-purple-600 font-medium">({studentTotalCount} ชิ้นงาน)</span>
                   </div>
                   <span className="text-xs text-gray-500">
@@ -955,27 +1127,41 @@ export default function SubmissionStatusView({
                     <Search size={32} />
                   </div>
                   <h3 className="text-lg font-bold text-gray-800">
-                    ยังไม่มีประวัติการส่งงานของนักเรียน "{searchTerm}"
+                    {hasSearched
+                      ? `ยังไม่มีประวัติการส่งงานของนักเรียน "${searchTerm}" ตามตัวกรองที่เลือก`
+                      : 'ไม่พบประวัติการส่งงานตามตัวกรอง ชั้น / ห้อง / วิชา / ใบงาน ที่เลือก'}
                   </h3>
                   <p className="text-sm text-gray-500 max-w-md mx-auto">
-                    หากคุณยังไม่ได้ส่งงาน สามารถคลิกปุ่มด้านล่างเพื่อเริ่มส่งงาน หรือคลิกแท็บ <span className="font-bold text-rose-600">"งานที่ค้างส่ง"</span> เพื่อดูว่ามีงานอะไรบ้าง
+                    {hasSearched
+                      ? <>หากคุณยังไม่ได้ส่งงาน สามารถคลิกปุ่มด้านล่างเพื่อเริ่มส่งงาน หรือคลิกแท็บ <span className="font-bold text-rose-600">"งานที่ค้างส่ง"</span> เพื่อดูว่ามีงานอะไรบ้าง</>
+                      : 'ลองปรับตัวกรองด้านบน หรือคลิกปุ่มด้านล่างเพื่อเริ่มส่งงาน'}
                   </p>
-                  <div className="flex items-center justify-center gap-3 pt-2">
+                  <div className="flex items-center justify-center gap-3 pt-2 flex-wrap">
                     {onNavigateToSubmit && (
                       <button
                         onClick={() => handleQuickSubmit()}
                         className="px-5 py-2.5 bg-gradient-to-r from-violet-600 to-indigo-600 text-white rounded-xl text-xs font-bold shadow-md cursor-pointer hover:scale-102 transition-all flex items-center gap-1.5"
                       >
                         <Plus size={15} />
-                        <span>➕ ส่งงานแรกของคุณเลย</span>
+                        <span>➕ ส่งงานใหม่</span>
                       </button>
                     )}
-                    <button
-                      onClick={() => setActiveSubTab('pending')}
-                      className="px-5 py-2.5 bg-amber-50 text-amber-900 border border-amber-300 rounded-xl text-xs font-bold hover:bg-amber-100 transition-colors cursor-pointer"
-                    >
-                      <span>⚠️ ดูงานที่ค้างส่ง</span>
-                    </button>
+                    {hasSearched && (
+                      <button
+                        onClick={() => setActiveSubTab('pending')}
+                        className="px-5 py-2.5 bg-amber-50 text-amber-900 border border-amber-300 rounded-xl text-xs font-bold hover:bg-amber-100 transition-colors cursor-pointer"
+                      >
+                        <span>⚠️ ดูงานที่ค้างส่ง</span>
+                      </button>
+                    )}
+                    {hasActiveFilter && (
+                      <button
+                        onClick={handleResetAllFilters}
+                        className="px-5 py-2.5 bg-purple-50 text-purple-900 border border-purple-200 rounded-xl text-xs font-bold hover:bg-purple-100 transition-colors cursor-pointer"
+                      >
+                        <span>🔄 ล้างตัวกรอง</span>
+                      </button>
+                    )}
                   </div>
                 </div>
               ) : (
@@ -1139,9 +1325,12 @@ export default function SubmissionStatusView({
                     <h3 className="text-base font-bold text-gray-900">
                       รายการงานที่ยังไม่ส่ง {targetGrade !== 'ALL' ? `สำหรับชั้น ${targetGrade}` : ''}
                       {selectedSubject !== 'ALL' && selectedSubjectInfo ? ` • วิชา ${selectedSubjectInfo.label}` : ''}
+                      {selectedAssignmentInfo ? ` • ${selectedAssignmentInfo.title}` : ''}
                     </h3>
                     <p className="text-xs text-gray-500">
-                      ตรวจพบงานที่ยังไม่ได้ส่งทั้งหมด <b className="text-rose-600">{pendingAssignments.length}</b> ชิ้นงาน
+                      {hasSearched
+                        ? <>ตรวจพบงานที่ยังไม่ได้ส่งทั้งหมด <b className="text-rose-600">{pendingAssignments.length}</b> ชิ้นงาน</>
+                        : 'พิมพ์ชื่อนักเรียนในช่องค้นหาด้านบน เพื่อตรวจเช็กงานที่ยังไม่ส่งรายบุคคล'}
                     </p>
                   </div>
                 </div>
@@ -1156,14 +1345,31 @@ export default function SubmissionStatusView({
                     <option value="ALL">🌟 ทุกรายวิชา ({allPendingAssignments.length} งาน)</option>
                     {availableSubjects.map(s => (
                       <option key={s.value} value={s.value}>
-                        {s.label} ({s.pendingCount > 0 ? `ยังไม่ส่ง ${s.pendingCount}` : 'ส่งครบแล้ว'})
+                        {s.label}{hasSearched ? ` (${s.pendingCount > 0 ? `ยังไม่ส่ง ${s.pendingCount}` : 'ส่งครบแล้ว'})` : ''}
                       </option>
                     ))}
                   </select>
                 </div>
               </div>
 
-              {pendingAssignments.length === 0 ? (
+              {!hasSearched ? (
+                <div className="bg-white/95 rounded-3xl p-10 text-center border border-amber-200 shadow-sm space-y-3">
+                  <div className="w-14 h-14 rounded-2xl bg-amber-100 text-amber-700 flex items-center justify-center mx-auto text-2xl">
+                    🧑‍🎓
+                  </div>
+                  <h4 className="text-base font-bold text-gray-900">กรุณาพิมพ์ชื่อนักเรียนเพื่อตรวจสอบงานที่ยังไม่ส่ง</h4>
+                  <p className="text-xs text-gray-500 max-w-md mx-auto">
+                    การตรวจสอบงานค้างส่งต้องระบุชื่อหรือนามสกุลของนักเรียน ส่วนรายการที่ส่งแล้วตาม ชั้น / ห้อง / วิชา / ใบงาน สามารถดูได้ในแท็บ <b>"📑 งานที่ส่งแล้ว"</b>
+                  </p>
+                  <button
+                    type="button"
+                    onClick={() => setActiveSubTab('submitted')}
+                    className="px-5 py-2 bg-violet-600 hover:bg-violet-700 text-white rounded-xl text-xs font-bold cursor-pointer"
+                  >
+                    ดูรายการงานที่ส่งแล้ว ({studentTotalCount}) →
+                  </button>
+                </div>
+              ) : pendingAssignments.length === 0 ? (
                 <div className="bg-gradient-to-r from-emerald-50 via-teal-50 to-emerald-100 rounded-3xl p-10 md:p-14 text-center border-2 border-emerald-300 shadow-xl space-y-4">
                   <div className="w-20 h-20 rounded-full bg-emerald-500 text-white flex items-center justify-center mx-auto text-4xl shadow-lg shadow-emerald-200">
                     🎉
@@ -1317,27 +1523,30 @@ export default function SubmissionStatusView({
                     ))}
                   </select>
 
-                  <button
-                    type="button"
-                    onClick={() => setShowOnlyPendingInSubjects(prev => !prev)}
-                    className={`px-3 py-1.5 rounded-xl text-xs font-bold border transition-all cursor-pointer ${
-                      showOnlyPendingInSubjects
-                        ? 'bg-rose-600 text-white border-rose-600 shadow-xs'
-                        : 'bg-rose-50 hover:bg-rose-100 text-rose-800 border-rose-200'
-                    }`}
-                  >
-                    {showOnlyPendingInSubjects ? '⚠️ แสดงเฉพาะงานที่ยังไม่ส่ง (เปิดอยู่)' : '🔍 แสดงเฉพาะงานที่ยังไม่ส่ง'}
-                  </button>
+                  {hasSearched && (
+                    <button
+                      type="button"
+                      onClick={() => setShowOnlyPendingInSubjects(prev => !prev)}
+                      className={`px-3 py-1.5 rounded-xl text-xs font-bold border transition-all cursor-pointer ${
+                        showOnlyPendingInSubjects
+                          ? 'bg-rose-600 text-white border-rose-600 shadow-xs'
+                          : 'bg-rose-50 hover:bg-rose-100 text-rose-800 border-rose-200'
+                      }`}
+                    >
+                      {showOnlyPendingInSubjects ? '⚠️ แสดงเฉพาะงานที่ยังไม่ส่ง (เปิดอยู่)' : '🔍 แสดงเฉพาะงานที่ยังไม่ส่ง'}
+                    </button>
+                  )}
                 </div>
               </div>
 
               <div className={`grid grid-cols-1 ${filteredSubjectGroups.length === 1 ? '' : 'md:grid-cols-2'} gap-4`}>
                 {filteredSubjectGroups.map((group) => {
+                  const submittedAssignCount = group.totalAssignments.filter(a => Boolean(findMatchingSubmission(a, group.submitted))).length;
                   const percent = group.totalAssignments.length > 0
-                    ? Math.round((group.submitted.length / group.totalAssignments.length) * 100)
+                    ? Math.min(100, Math.round((submittedAssignCount / group.totalAssignments.length) * 100))
                     : 100;
                   const isAllDone = group.pending.length === 0;
-                  const displayedAssignments = showOnlyPendingInSubjects
+                  const displayedAssignments = (hasSearched && showOnlyPendingInSubjects)
                     ? group.pending
                     : group.totalAssignments;
 
@@ -1363,20 +1572,26 @@ export default function SubmissionStatusView({
                             </p>
                           </div>
 
-                          <span className={`px-2.5 py-1 rounded-full text-xs font-bold border ${
-                            isAllDone
-                              ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
-                              : 'bg-rose-50 text-rose-700 border-rose-200'
-                          }`}>
-                            {isAllDone ? '✅ ส่งครบแล้ว' : `⚠️ ยังไม่ส่ง ${group.pending.length} งาน`}
-                          </span>
+                          {hasSearched ? (
+                            <span className={`px-2.5 py-1 rounded-full text-xs font-bold border ${
+                              isAllDone
+                                ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                                : 'bg-rose-50 text-rose-700 border-rose-200'
+                            }`}>
+                              {isAllDone ? '✅ ส่งครบแล้ว' : `⚠️ ยังไม่ส่ง ${group.pending.length} งาน`}
+                            </span>
+                          ) : (
+                            <span className="px-2.5 py-1 rounded-full text-xs font-bold border bg-indigo-50 text-indigo-700 border-indigo-200">
+                              📑 ส่งแล้ว {group.submitted.length} ชิ้น
+                            </span>
+                          )}
                         </div>
 
                         {/* Progress Bar */}
                         <div>
                           <div className="flex justify-between text-xs font-semibold text-gray-600 mb-1">
-                            <span>ความก้าวหน้าการส่งงาน</span>
-                            <span className="text-violet-700">{group.submitted.length}/{group.totalAssignments.length} งาน ({percent}%)</span>
+                            <span>{hasSearched ? 'ความก้าวหน้าการส่งงาน' : 'ใบงานที่มีการส่งแล้ว'}</span>
+                            <span className="text-violet-700">{submittedAssignCount}/{group.totalAssignments.length} ใบงาน ({percent}%)</span>
                           </div>
                           <div className="w-full h-2.5 bg-gray-100 rounded-full overflow-hidden">
                             <div 
@@ -1390,17 +1605,25 @@ export default function SubmissionStatusView({
 
                         {/* Score overview in this subject */}
                         <div className="p-3 bg-purple-50/40 rounded-2xl border border-purple-100/70 flex items-center justify-between text-xs">
-                          <span className="text-gray-600 font-medium">คะแนนสะสมในวิชานี้:</span>
-                          <span className="font-extrabold text-violet-900 text-sm">
-                            {group.earnedScore} <span className="text-gray-400 font-normal">/ {group.maxScore} คะแนน</span>
+                          <span className="text-gray-600 font-medium">
+                            {hasSearched ? 'คะแนนสะสมในวิชานี้:' : 'จำนวนผลงานที่ส่งตามตัวกรอง:'}
                           </span>
+                          {hasSearched ? (
+                            <span className="font-extrabold text-violet-900 text-sm">
+                              {group.earnedScore} <span className="text-gray-400 font-normal">/ {group.maxScore} คะแนน</span>
+                            </span>
+                          ) : (
+                            <span className="font-extrabold text-violet-900 text-sm">
+                              {group.submitted.length} <span className="text-gray-400 font-normal">ชิ้นงาน</span>
+                            </span>
+                          )}
                         </div>
 
                         {/* List of assignments in this subject */}
                         <div className="space-y-1.5 pt-1">
                           <div className="text-[11px] font-bold text-gray-500 uppercase tracking-wider flex items-center justify-between">
-                            <span>{showOnlyPendingInSubjects ? 'รายการงานที่ยังไม่ส่งในวิชานี้:' : 'รายการงานในวิชานี้:'}</span>
-                            {!isAllDone && !showOnlyPendingInSubjects && (
+                            <span>{hasSearched && showOnlyPendingInSubjects ? 'รายการงานที่ยังไม่ส่งในวิชานี้:' : 'รายการงานในวิชานี้:'}</span>
+                            {hasSearched && !isAllDone && !showOnlyPendingInSubjects && (
                               <span className="text-rose-600 font-bold">ค้าง {group.pending.length} ชิ้น</span>
                             )}
                           </div>
@@ -1411,6 +1634,10 @@ export default function SubmissionStatusView({
                           ) : (
                             displayedAssignments.map((a) => {
                               const sub = findMatchingSubmission(a, group.submitted);
+                              const matchedCount = group.submitted.filter(s =>
+                                (a.id && s.assignmentId && s.assignmentId === a.id) ||
+                                (a.title && s.assignmentName && a.title.trim().toLowerCase() === s.assignmentName.trim().toLowerCase())
+                              ).length;
 
                               return (
                                 <div 
@@ -1418,12 +1645,12 @@ export default function SubmissionStatusView({
                                   className={`p-2.5 rounded-xl border text-xs flex items-center justify-between gap-2 ${
                                     sub 
                                       ? 'bg-emerald-50/40 border-emerald-100 text-gray-800'
-                                      : 'bg-rose-50/60 border-rose-200 text-gray-900'
+                                      : hasSearched ? 'bg-rose-50/60 border-rose-200 text-gray-900' : 'bg-gray-50/70 border-gray-200 text-gray-800'
                                   }`}
                                 >
                                   <div className="min-w-0 flex-1">
                                     <div className="font-semibold truncate flex items-center gap-1.5" title={a.title}>
-                                      {!sub && (
+                                      {hasSearched && !sub && (
                                         <span className="px-1.5 py-0.5 rounded bg-rose-100 text-rose-700 text-[10px] font-black shrink-0">
                                           ยังไม่ส่ง
                                         </span>
@@ -1436,22 +1663,35 @@ export default function SubmissionStatusView({
                                   </div>
 
                                   <div className="shrink-0 flex items-center gap-1.5">
-                                    {sub ? (
-                                      <span className="px-2 py-0.5 bg-emerald-100 text-emerald-800 rounded-md font-bold text-[10px] flex items-center gap-0.5">
-                                        <CheckCircle size={10} />
-                                        <span>ส่งแล้ว {sub.score !== null ? `(${sub.score}/${sub.maxScore})` : ''}</span>
-                                      </span>
-                                    ) : (
-                                      onNavigateToSubmit && (
-                                        <button
-                                          type="button"
-                                          onClick={() => handleQuickSubmit(a)}
-                                          className="px-2.5 py-1 bg-amber-500 hover:bg-amber-600 text-white rounded-lg font-bold text-[10px] flex items-center gap-1 cursor-pointer transition-colors"
-                                        >
-                                          <span>ส่งงานนี้</span>
-                                          <span>→</span>
-                                        </button>
+                                    {hasSearched ? (
+                                      sub ? (
+                                        <span className="px-2 py-0.5 bg-emerald-100 text-emerald-800 rounded-md font-bold text-[10px] flex items-center gap-0.5">
+                                          <CheckCircle size={10} />
+                                          <span>ส่งแล้ว {sub.score !== null ? `(${sub.score}/${sub.maxScore})` : ''}</span>
+                                        </span>
+                                      ) : (
+                                        onNavigateToSubmit && (
+                                          <button
+                                            type="button"
+                                            onClick={() => handleQuickSubmit(a)}
+                                            className="px-2.5 py-1 bg-amber-500 hover:bg-amber-600 text-white rounded-lg font-bold text-[10px] flex items-center gap-1 cursor-pointer transition-colors"
+                                          >
+                                            <span>ส่งงานนี้</span>
+                                            <span>→</span>
+                                          </button>
+                                        )
                                       )
+                                    ) : (
+                                      <button
+                                        type="button"
+                                        onClick={() => {
+                                          setSelectedAssignment(a.id || a.title);
+                                          setActiveSubTab('submitted');
+                                        }}
+                                        className="px-2.5 py-1 bg-indigo-50 hover:bg-indigo-100 text-indigo-800 border border-indigo-200 rounded-lg font-bold text-[10px] cursor-pointer transition-colors"
+                                      >
+                                        ส่งแล้ว {matchedCount} ชิ้น →
+                                      </button>
                                     )}
                                   </div>
                                 </div>
